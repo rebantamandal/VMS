@@ -1,0 +1,170 @@
+.homepage {
+  position: relative;
+  min-height: 100vh;
+  background: url("./images/Key\ Visual\ 1.jpg") no-repeat center center/cover; /* replace with your image */
+  display: flex;
+  justify-content: flex-start;
+  /* align-items: flex-start; */
+  font-family:'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  
+}
+
+.overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6); /* dark overlay */
+}
+
+h1.display-2{
+  font-family:'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+}
+
+.content {
+  position: relative;
+  z-index: 2;
+  
+}
+
+form.login{
+  background: #4C4948;
+  color: #ffffff;
+}
+
+footer.watermark{
+  font-family:'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+    background: #000000;
+    color: #ffffff;
+}
+
+nav.navbar{
+font-family:'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+    /* background: #D8B200; */
+}
+
+p.tagline {
+  letter-spacing: 2px;
+  font-size: 0.9rem;
+  font-family:'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  font-weight: 500;
+}
+
+/* Gradient pill buttons */
+.custom-btn {
+  background:  #D6D6D6; /* soft beige gradient */
+  border: none;
+  padding: 12px 50px;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #000;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15); /* soft shadow */
+}
+
+.custom-btn:hover {
+  border: 2px solid #D6D6D6;
+  background: transparent;
+  box-shadow: 0 6px 15px rgba(0, 0, 0, 0.25);
+}
+
+/* Mobile-friendly drawer */
+@media (max-width: 768px) {
+  .visitor-form-panel {
+    width: 100% !important;
+    max-width: none !important;
+  }
+}
+
+.info{
+  font-family:'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+}
+
+.service-page {
+  position: relative;
+  min-height: 100vh;
+  background: url("./images/449A0592.JPG") no-repeat center center/cover;
+  display: flex;
+  justify-content: flex-start;
+  font-family:'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+}
+
+
+
+.shadow-text {
+  text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.6);
+}
+
+.content-box {
+  max-width: 400px;
+}
+
+button.btn{
+  font-weight: 600;
+}
+.service-btn {
+          background: #D8B200; /* soft beige gradient */
+          color: #333;
+          font-size: 1.2rem;
+          font-weight: bold;
+          padding: 20px;
+          border: none;
+          border-radius: 20px;
+          width: 100%;
+          height: 100%;
+          aspect-ratio: 1 / 1;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-direction: column;
+          max-width: 500px;
+          max-height: 20vh;
+          gap: 10px;
+          transition: all 0.3s ease-in-out;
+          cursor: pointer;
+}
+
+.service-btn:hover {
+          background: #F08C00; /* lighter on hover */
+          transform: scale(1.05);
+          box-shadow: 0px 4px 15px rgba(0, 0, 0, 0.2);
+}
+        
+.service-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+          gap: 15px;
+          max-width: 600px;
+}
+
+.vms-title {
+  font-size: 3.5rem; /* Mobile */
+}
+
+@media (max-width: 768px) {
+          .service-grid {
+            max-width: 100%;
+            grid-template-columns: repeat(2, 1fr);
+          }
+          .vms-title {
+    font-size: 2rem; /* Desktop */
+  }
+}
+
