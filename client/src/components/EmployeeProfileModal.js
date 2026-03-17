@@ -41,6 +41,7 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
   const [visitRowsByPerson, setVisitRowsByPerson] = useState({});
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("all");
   const [selectedRows, setSelectedRows] = useState({});
   const [selectMultipleMode, setSelectMultipleMode] = useState(false);
   const [bulkTentativeInTime, setBulkTentativeInTime] = useState("");
@@ -175,6 +176,7 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
     if (show) {
       fetchHistory();
       setSearchQuery("");
+      setSourceFilter("all");
       setSelectedRows({});
       setSelectMultipleMode(false);
       setBulkTentativeInTime("");
@@ -185,15 +187,18 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
   const filteredRows = useMemo(() => {
     const query = normalize(searchQuery);
     const phoneQuery = normalizePhone(searchQuery);
-    if (!query) return historyRows;
     return historyRows.filter((row) => {
+      const matchesSource = sourceFilter === "all" || row.source === sourceFilter;
+      if (!matchesSource) return false;
+      if (!query) return true;
+
       return (
         normalize(row.fullName).includes(query) ||
         normalize(row.email).includes(query) ||
         (phoneQuery.length > 0 && normalizePhone(row.phone).includes(phoneQuery))
       );
     });
-  }, [historyRows, searchQuery]);
+  }, [historyRows, searchQuery, sourceFilter]);
 
   const selectedKeys = useMemo(
     () => Object.keys(selectedRows).filter((k) => selectedRows[k]),
@@ -219,6 +224,14 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
     () => selectedEntries.filter((row) => row.source === "guest"),
     [selectedEntries]
   );
+
+  const selectionScopeSource = selectedSource || (sourceFilter !== "all" ? sourceFilter : null);
+  const selectionScopeLabel =
+    selectionScopeSource === "visitor"
+      ? "Visitors"
+      : selectionScopeSource === "guest"
+        ? "Guests"
+        : "Visitors and Guests";
 
   const isBulkTimeRequired = selectedKeys.length > 1 && Boolean(selectedSource);
   const isBulkTimeComplete = Boolean(bulkTentativeInTime) && Boolean(bulkTentativeOutTime);
@@ -247,6 +260,25 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
       }
       return next;
     });
+  };
+
+  const handleSourceFilterChange = (nextFilter) => {
+    if (nextFilter === sourceFilter) return;
+
+    const switchingAcrossLockedTypes =
+      selectMultipleMode &&
+      selectedKeys.length > 0 &&
+      nextFilter !== "all" &&
+      selectedSource &&
+      nextFilter !== selectedSource;
+
+    if (switchingAcrossLockedTypes) {
+      setSelectedRows({});
+      setBulkTentativeInTime("");
+      setBulkTentativeOutTime("");
+    }
+
+    setSourceFilter(nextFilter);
   };
 
   const openRepeatForm = (row) => {
@@ -439,18 +471,18 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
                 <div className="d-flex align-items-center gap-2 flex-wrap" style={{ minHeight: CONTROL_HEIGHT }}>
                   <button
                     type="button"
-                    className={`btn btn-sm d-inline-flex align-items-center justify-content-center ${selectMultipleMode ? "btn-dark" : "btn-outline-secondary"}`}
+                    className={`btn btn-sm d-inline-flex align-items-center justify-content-center gap-2 ${selectMultipleMode ? "btn-dark" : "btn-outline-secondary"}`}
                     style={{ fontSize: CONTROL_FONT, height: CONTROL_HEIGHT, padding: "0 14px", borderRadius: "999px", whiteSpace: "nowrap" }}
                     onClick={toggleSelectMultipleMode}
                   >
-                    {selectMultipleMode ? "Cancel Selection" : "Select Multiple"}
+                    {selectMultipleMode ? "Exit Multi-Select" : "Select Multiple"}
                   </button>
 
                   {selectMultipleMode && (
                     <span className="badge rounded-pill d-inline-flex align-items-center gap-1"
-                      style={selectedSource
+                      style={selectionScopeSource
                         ? {
-                            ...(SOURCE_STYLE[selectedSource]?.badge || {}),
+                            ...(SOURCE_STYLE[selectionScopeSource]?.badge || {}),
                             fontSize: "0.78rem",
                             padding: "7px 11px",
                             height: CONTROL_HEIGHT,
@@ -463,26 +495,51 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
                             color: "#475569",
                             border: "1px solid #cbd5e1",
                           }}>
-                      {selectedSource === "visitor" ? <FaUserTie size={11} /> : selectedSource === "guest" ? <FaUserFriends size={11} /> : null}
-                      {selectedSource
-                        ? `${selectedKeys.length}/${MAX_SELECTION} ${selectedSource === "visitor" ? "Visitors" : "Guests"}`
-                        : `0/${MAX_SELECTION} Selected`}
+                      {selectionScopeSource === "visitor" ? <FaUserTie size={11} /> : selectionScopeSource === "guest" ? <FaUserFriends size={11} /> : null}
+                      {`${selectedKeys.length}/${MAX_SELECTION} ${selectionScopeLabel}`}
                     </span>
                   )}
+                </div>
+
+                <div className="d-flex align-items-center justify-content-end gap-2 flex-wrap ms-auto">
+                  {[
+                    { key: "all", label: "All", count: historyRows.length },
+                    { key: "visitor", label: "Visitors Only", count: visitorCount },
+                    { key: "guest", label: "Guests Only", count: guestCount },
+                  ].map((option) => {
+                    const isActive = sourceFilter === option.key;
+                    return (
+                      <button
+                        key={option.key}
+                        type="button"
+                        className={`btn btn-sm ${isActive ? "btn-dark" : "btn-outline-secondary"}`}
+                        style={{
+                          fontSize: CONTROL_FONT,
+                          height: CONTROL_HEIGHT,
+                          padding: "0 14px",
+                          borderRadius: "999px",
+                          whiteSpace: "nowrap",
+                        }}
+                        onClick={() => handleSourceFilterChange(option.key)}
+                      >
+                        {option.label} ({option.count})
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
               {/* Type-lock hint */}
-              {selectMultipleMode && selectedSource && (
+              {selectMultipleMode && selectionScopeSource && (
                 <div className="rounded-3 px-3 py-2 d-flex align-items-center gap-2"
-                  style={{ background: SOURCE_STYLE[selectedSource]?.badge?.background || "#f1f5f9",
-                           border: `1px solid ${SOURCE_STYLE[selectedSource]?.border || "#cbd5e1"}`,
+                  style={{ background: SOURCE_STYLE[selectionScopeSource]?.badge?.background || "#f1f5f9",
+                           border: `1px solid ${SOURCE_STYLE[selectionScopeSource]?.border || "#cbd5e1"}`,
                            fontSize: "0.82rem" }}>
-                  <span style={{ color: SOURCE_STYLE[selectedSource]?.badge?.color }}>
-                    {selectedSource === "visitor" ? <FaUserTie /> : <FaUserFriends />}
+                  <span style={{ color: SOURCE_STYLE[selectionScopeSource]?.badge?.color }}>
+                    {selectionScopeSource === "visitor" ? <FaUserTie /> : <FaUserFriends />}
                   </span>
                   <span>
-                    Only <strong>{selectedSource === "visitor" ? "Visitors" : "Guests"}</strong> can be selected at once.
+                    Only <strong>{selectionScopeLabel}</strong> can be selected at once.
                     {selectedKeys.length >= MAX_SELECTION && (
                       <span className="ms-2 fw-semibold text-danger">Max {MAX_SELECTION} reached.</span>
                     )}
@@ -522,7 +579,7 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
                     const srcStyle = SOURCE_STYLE[row.source] || SOURCE_STYLE.visitor;
 
                     // In multi-select mode, rows NOT matching the locked type are hidden
-                    const hiddenByLock = selectMultipleMode && selectedSource && selectedSource !== row.source;
+                    const hiddenByLock = selectMultipleMode && selectionScopeSource && selectionScopeSource !== row.source;
                     if (hiddenByLock) return null;
 
                     const atMax = selectedKeys.length >= MAX_SELECTION && !isSelected;
