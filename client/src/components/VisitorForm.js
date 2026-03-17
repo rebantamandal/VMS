@@ -235,16 +235,16 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit, re
     const parsedCountryCode = phoneParts.countryCode;
     const parsedPhone = phoneParts.phone;
 
-    const nextVisitor = {
-      category: repeatSeed.category || "Visitor",
-      host: ssoUserName,
-      firstName: repeatSeed.firstName || "",
-      lastName: repeatSeed.lastName || "",
-      email: repeatSeed.email || "",
-      company: repeatSeed.company || "",
-      countryCode: parsedCountryCode,
-      phone: parsedPhone,
-      purposeOfVisit: repeatSeed.purposeOfVisit || "",
+      const nextVisitor = {
+        category: repeatSeed.category || "Visitor",
+        host: ssoUserName,
+        firstName: repeatSeed.firstName || "",
+        lastName: repeatSeed.lastName || "",
+        email: repeatSeed.email || "",
+        company: repeatSeed.company || "",
+        countryCode: parsedCountryCode,
+        phone: parsedPhone,
+        purposeOfVisit: "",
       meetingRoom: "",
       laptopSerial: repeatSeed.laptopSerial || "",
       guestWifiRequired: false,
@@ -293,16 +293,16 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit, re
           ? new Date(seed.outTime).toISOString().slice(0, 16)
           : "";
 
-      return {
-        category: seed.category || "Visitor",
-        host: ssoUserName,
-        firstName: seed.firstName || "",
-        lastName: seed.lastName || "",
-        email: seed.email || "",
-        company: seed.company || "",
-        countryCode: parsedCountryCode,
-        phone: parsedPhone,
-        purposeOfVisit: seed.purposeOfVisit || "",
+        return {
+          category: seed.category || "Visitor",
+          host: ssoUserName,
+          firstName: seed.firstName || "",
+          lastName: seed.lastName || "",
+          email: seed.email || "",
+          company: seed.company || "",
+          countryCode: parsedCountryCode,
+          phone: parsedPhone,
+          purposeOfVisit: "",
         meetingRoom: "",
         laptopSerial: seed.laptopSerial || "",
         guestWifiRequired: false,

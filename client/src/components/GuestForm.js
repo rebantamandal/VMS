@@ -252,17 +252,17 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit, repeat
     const parsedCountryCode = phoneParts.countryCode;
     const parsedPhone = phoneParts.phone;
 
-    const nextGuest = {
-      category: repeatSeed.category || "Isuzu Employee",
-      firstName: repeatSeed.firstName || "",
-      lastName: repeatSeed.lastName || "",
-      email: repeatSeed.email || "",
-      company: repeatSeed.company || "",
-      host: ssoHostName,
-      onBehalfOf: false,
-      countryCode: parsedCountryCode,
-      phone: parsedPhone,
-      purposeOfVisit: repeatSeed.purposeOfVisit || "",
+      const nextGuest = {
+        category: repeatSeed.category || "Isuzu Employee",
+        firstName: repeatSeed.firstName || "",
+        lastName: repeatSeed.lastName || "",
+        email: repeatSeed.email || "",
+        company: repeatSeed.company || "",
+        host: ssoHostName,
+        onBehalfOf: false,
+        countryCode: parsedCountryCode,
+        phone: parsedPhone,
+        purposeOfVisit: "",
       meetingRoom: "",
       meetingRoomRequired: false,
       laptopSerial: repeatSeed.laptopSerial || "",
@@ -313,17 +313,17 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit, repeat
           ? new Date(seed.outTime).toISOString().slice(0, 16)
           : "";
 
-      return {
-        category: seed.category || "Isuzu Employee",
-        firstName: seed.firstName || "",
-        lastName: seed.lastName || "",
-        email: seed.email || "",
-        company: seed.company || "",
-        host: ssoHostName,
-        onBehalfOf: false,
-        countryCode: parsedCountryCode,
-        phone: parsedPhone,
-        purposeOfVisit: seed.purposeOfVisit || "",
+        return {
+          category: seed.category || "Isuzu Employee",
+          firstName: seed.firstName || "",
+          lastName: seed.lastName || "",
+          email: seed.email || "",
+          company: seed.company || "",
+          host: ssoHostName,
+          onBehalfOf: false,
+          countryCode: parsedCountryCode,
+          phone: parsedPhone,
+          purposeOfVisit: "",
         meetingRoom: "",
         meetingRoomRequired: false,
         laptopSerial: seed.laptopSerial || "",
