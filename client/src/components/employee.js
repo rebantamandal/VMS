@@ -1,14 +1,25 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { FaUserTie, FaUserFriends } from "react-icons/fa";
+import { useMsal } from "@azure/msal-react";
 
 import Navbar from "./navbar";
 import VisitorForm from "./VisitorForm";
 import GuestForm from "./GuestForm";
+import EmployeeProfileModal from "./EmployeeProfileModal";
 
 export default function Employee() {
   const [activeForm, setActiveForm] = useState(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [showProfile, setShowProfile] = useState(false);
+  const [repeatDraft, setRepeatDraft] = useState(null);
+  const { accounts } = useMsal();
+  const currentAccount = Array.isArray(accounts) ? accounts[0] : null;
+  const displayUserName =
+    currentAccount?.name ||
+    currentAccount?.username ||
+    currentAccount?.localAccountId ||
+    "Unknown User";
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
@@ -19,8 +30,24 @@ export default function Employee() {
   const iconSize = isMobile ? 20 : 60;
 
   const forms = {
-    visitor: <VisitorForm isMobile={isMobile} setActiveForm={setActiveForm} />,
-    guest: <GuestForm isMobile={isMobile} setActiveForm={setActiveForm} />,
+    visitor: (
+      <VisitorForm
+        isMobile={isMobile}
+        setActiveForm={setActiveForm}
+        repeatSeed={repeatDraft?.type === "visitor" && !Array.isArray(repeatDraft.data) ? repeatDraft.data : null}
+        repeatBatch={repeatDraft?.type === "visitor" && Array.isArray(repeatDraft.data) ? repeatDraft.data : null}
+        onRepeatSeedConsumed={() => setRepeatDraft(null)}
+      />
+    ),
+    guest: (
+      <GuestForm
+        isMobile={isMobile}
+        setActiveForm={setActiveForm}
+        repeatSeed={repeatDraft?.type === "guest" && !Array.isArray(repeatDraft.data) ? repeatDraft.data : null}
+        repeatBatch={repeatDraft?.type === "guest" && Array.isArray(repeatDraft.data) ? repeatDraft.data : null}
+        onRepeatSeedConsumed={() => setRepeatDraft(null)}
+      />
+    ),
   };
 
   const services = [
@@ -30,7 +57,27 @@ export default function Employee() {
 
   return (
     <div className="service-page d-flex flex-column min-vh-200 text-dark">
-      <Navbar />
+      <Navbar
+        profileAction={() => setShowProfile(true)}
+        profileLabel="Profile"
+        profileTooltip="Open previous visitors and guests for quick repeat"
+        userName={displayUserName}
+      />
+
+      <EmployeeProfileModal
+        show={showProfile}
+        onClose={() => setShowProfile(false)}
+        onRepeatSelect={(payload) => {
+          setShowProfile(false);
+          setRepeatDraft(payload);
+          setActiveForm(payload.type);
+        }}
+        onRepeatMultiSelect={(payload) => {
+          setShowProfile(false);
+          setRepeatDraft(payload);
+          setActiveForm(payload.type);
+        }}
+      />
 
       <div className="flex-grow-1 container py-4">
         <motion.div
@@ -54,7 +101,10 @@ export default function Employee() {
                   <motion.button
                     key={id}
                     className="service-btn"
-                    onClick={() => setActiveForm(activeForm === id ? null : id)}
+                    onClick={() => {
+                      setRepeatDraft(null);
+                      setActiveForm(activeForm === id ? null : id);
+                    }}
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
                   >
@@ -77,7 +127,10 @@ export default function Employee() {
               <div key={id}>
                 <motion.button
                   className="custom-btn d-flex align-items-center w-75"
-                  onClick={() => setActiveForm(activeForm === id ? null : id)}
+                  onClick={() => {
+                    setRepeatDraft(null);
+                    setActiveForm(activeForm === id ? null : id);
+                  }}
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                 >

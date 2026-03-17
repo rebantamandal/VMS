@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { FaUser, FaWifi } from "react-icons/fa";
 import { useMsal } from "@azure/msal-react";
@@ -55,10 +55,36 @@ const isCardFilled = (v) =>
   v.TentativeinTime &&
   v.TentativeoutTime;
 
-export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) {
+const hasVisitorCoreFields = (item) =>
+  item.firstName || item.lastName || item.email || item.company || item.phone || item.purposeOfVisit;
+
+const buildVisitorSeedSignature = (seed) => ({
+  category: seed?.category || "Visitor",
+  firstName: seed?.firstName || "",
+  lastName: seed?.lastName || "",
+  email: seed?.email || "",
+  company: seed?.company || "",
+  countryCode: seed?.countryCode || "",
+  phone: seed?.phone || "",
+  purposeOfVisit: seed?.purposeOfVisit || "",
+  meetingRoom: seed?.meetingRoom || "",
+  laptopSerial: seed?.laptopSerial || "",
+  guestWifiRequired: Boolean(seed?.guestWifiRequired),
+});
+
+const buildVisitorBatchSignature = (batch) =>
+  JSON.stringify(
+    (batch || []).map((seed) => ({
+      ...buildVisitorSeedSignature(seed),
+      TentativeinTime: seed?.TentativeinTime || seed?.inTime || "",
+      TentativeoutTime: seed?.TentativeoutTime || seed?.outTime || "",
+    }))
+  );
+
+export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit, repeatSeed, repeatBatch, onRepeatSeedConsumed }) {
   const { accounts } = useMsal();
 
-  const currentAccount = accounts[0];
+  const currentAccount = Array.isArray(accounts) ? accounts[0] : null;
   const ssoUserName =
     currentAccount?.name ||
     currentAccount?.username ||
@@ -112,7 +138,13 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) 
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
   const [autofillStates, setAutofillStates] = useState({});
-  const [phoneDropdownOpen, setPhoneDropdownOpen] = useState({});
+  const visitorsRef = useRef(visitors);
+  const processedRepeatSeedRef = useRef("");
+  const processedRepeatBatchRef = useRef("");
+
+  useEffect(() => {
+    visitorsRef.current = visitors;
+  }, [visitors]);
 
   const getNowLocal = () => {
     const now = new Date();
@@ -165,6 +197,118 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) 
       setOpenIndex(0);
     }
   }, [visitorToEdit, ssoUserName]);
+
+  useEffect(() => {
+    if (!repeatSeed || visitorToEdit) return;
+
+    const seedSignature = JSON.stringify(buildVisitorSeedSignature(repeatSeed));
+    // Guard against repeated effect runs with the same repeat payload.
+    if (processedRepeatSeedRef.current === seedSignature) return;
+    processedRepeatSeedRef.current = seedSignature;
+
+    const rawPhone = repeatSeed.phone || "";
+    const match = rawPhone.match(/^(\+\d{1,4})(\d{7,15})$/);
+    const parsedCountryCode = repeatSeed.countryCode || match?.[1] || "+91";
+    const parsedPhone = match?.[2] || rawPhone.replace(/\D/g, "");
+
+    const nextVisitor = {
+      category: repeatSeed.category || "Visitor",
+      host: ssoUserName,
+      firstName: repeatSeed.firstName || "",
+      lastName: repeatSeed.lastName || "",
+      email: repeatSeed.email || "",
+      company: repeatSeed.company || "",
+      countryCode: parsedCountryCode,
+      phone: parsedPhone,
+      purposeOfVisit: repeatSeed.purposeOfVisit || "",
+      meetingRoom: repeatSeed.meetingRoom || "",
+      laptopSerial: repeatSeed.laptopSerial || "",
+      guestWifiRequired: Boolean(repeatSeed.guestWifiRequired),
+      TentativeinTime: "",
+      TentativeoutTime: "",
+      submittedBy: ssoEmail,
+      status: "new",
+    };
+
+    setVisitors((prev) => {
+      const hasFilledEntries = prev.some(hasVisitorCoreFields);
+      const base = hasFilledEntries ? prev : [];
+      const combined = [...base, nextVisitor].slice(0, MAX_VISITORS);
+
+      if (combined.length === base.length) {
+        Swal.fire({ icon: "warning", title: `Maximum ${MAX_VISITORS} visitors allowed per submission.` });
+      }
+
+      setOpenIndex(Math.max(0, combined.length - 1));
+      return combined;
+    });
+    setAutofillStates({});
+    if (typeof onRepeatSeedConsumed === "function") onRepeatSeedConsumed();
+  }, [repeatSeed, visitorToEdit, ssoUserName, ssoEmail, onRepeatSeedConsumed]);
+
+  useEffect(() => {
+    if (!repeatBatch || visitorToEdit || !Array.isArray(repeatBatch) || repeatBatch.length === 0) return;
+
+    const batchSignature = buildVisitorBatchSignature(repeatBatch);
+    // Guard against repeated effect runs with the same repeat batch.
+    if (processedRepeatBatchRef.current === batchSignature) return;
+    processedRepeatBatchRef.current = batchSignature;
+
+    const mapped = repeatBatch.slice(0, MAX_VISITORS).map((seed) => {
+      const rawPhone = seed.phone || "";
+      const match = rawPhone.match(/^(\+\d{1,4})(\d{7,15})$/);
+      const parsedCountryCode = seed.countryCode || match?.[1] || "+91";
+      const parsedPhone = match?.[2] || rawPhone.replace(/\D/g, "");
+      const parsedInTime = seed.TentativeinTime
+        ? seed.TentativeinTime
+        : seed.inTime
+          ? new Date(seed.inTime).toISOString().slice(0, 16)
+          : "";
+      const parsedOutTime = seed.TentativeoutTime
+        ? seed.TentativeoutTime
+        : seed.outTime
+          ? new Date(seed.outTime).toISOString().slice(0, 16)
+          : "";
+
+      return {
+        category: seed.category || "Visitor",
+        host: ssoUserName,
+        firstName: seed.firstName || "",
+        lastName: seed.lastName || "",
+        email: seed.email || "",
+        company: seed.company || "",
+        countryCode: parsedCountryCode,
+        phone: parsedPhone,
+        purposeOfVisit: seed.purposeOfVisit || "",
+        meetingRoom: seed.meetingRoom || "",
+        laptopSerial: seed.laptopSerial || "",
+        guestWifiRequired: Boolean(seed.guestWifiRequired),
+        TentativeinTime: parsedInTime,
+        TentativeoutTime: parsedOutTime,
+        submittedBy: ssoEmail,
+        status: "new",
+      };
+    });
+
+    setVisitors((prev) => {
+      const hasFilledEntries = prev.some(hasVisitorCoreFields);
+      const base = hasFilledEntries ? prev : [];
+      const combined = [...base, ...mapped].slice(0, MAX_VISITORS);
+
+      setOpenIndex(Math.max(0, combined.length - 1));
+      return combined;
+    });
+    setAutofillStates({});
+
+    const hasFilledEntries = visitorsRef.current.some(hasVisitorCoreFields);
+    const existingCount = hasFilledEntries ? visitorsRef.current.length : 0;
+    const availableSlots = Math.max(0, MAX_VISITORS - existingCount);
+    if (repeatBatch.length > availableSlots) {
+      Swal.fire({ icon: "warning", title: `Only first ${availableSlots} visitors were added due to form limit.` });
+    }
+
+    if (typeof onRepeatSeedConsumed === "function") onRepeatSeedConsumed();
+  }, [repeatBatch, visitorToEdit, ssoUserName, ssoEmail, onRepeatSeedConsumed]);
 
   const handleChange = (index, field, value) => {
     setVisitors((prev) =>

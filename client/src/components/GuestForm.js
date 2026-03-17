@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { FaUser, FaWifi } from "react-icons/fa";
 import { useMsal } from "@azure/msal-react";
@@ -55,10 +55,39 @@ const isCardFilled = (g) =>
   g.TentativeinTime &&
   g.TentativeoutTime;
 
-export default function GuestForm({ isMobile, setActiveForm, guestToEdit }) {
+const hasGuestCoreFields = (item) =>
+  item.firstName || item.lastName || item.email || item.company || item.phone || item.purposeOfVisit;
+
+const buildGuestSeedSignature = (seed) => ({
+  category: seed?.category || "Isuzu Employee",
+  firstName: seed?.firstName || "",
+  lastName: seed?.lastName || "",
+  email: seed?.email || "",
+  company: seed?.company || "",
+  countryCode: seed?.countryCode || "",
+  phone: seed?.phone || "",
+  purposeOfVisit: seed?.purposeOfVisit || "",
+  meetingRoom: seed?.meetingRoom || "",
+  meetingRoomRequired: Boolean(seed?.meetingRoomRequired),
+  laptopSerial: seed?.laptopSerial || "",
+  guestWifiRequired: Boolean(seed?.guestWifiRequired),
+  refreshmentRequired: Boolean(seed?.refreshmentRequired),
+  proposedRefreshmentTime: seed?.proposedRefreshmentTime || "",
+});
+
+const buildGuestBatchSignature = (batch) =>
+  JSON.stringify(
+    (batch || []).map((seed) => ({
+      ...buildGuestSeedSignature(seed),
+      TentativeinTime: seed?.TentativeinTime || seed?.inTime || "",
+      TentativeoutTime: seed?.TentativeoutTime || seed?.outTime || "",
+    }))
+  );
+
+export default function GuestForm({ isMobile, setActiveForm, guestToEdit, repeatSeed, repeatBatch, onRepeatSeedConsumed }) {
   const { accounts } = useMsal();
 
-  const currentAccount = accounts[0];
+  const currentAccount = Array.isArray(accounts) ? accounts[0] : null;
 
   const ssoHostName =
     currentAccount?.name ||
@@ -116,6 +145,13 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit }) {
   const [openIndex, setOpenIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const [autofillStates, setAutofillStates] = useState({});
+  const guestsRef = useRef(guests);
+  const processedRepeatSeedRef = useRef("");
+  const processedRepeatBatchRef = useRef("");
+
+  useEffect(() => {
+    guestsRef.current = guests;
+  }, [guests]);
 
   const getNowLocal = () => {
     const now = new Date();
@@ -179,6 +215,130 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit }) {
     }]);
     setOpenIndex(0);
   }, [guestToEdit, ssoEmail, ssoHostName]);
+
+  useEffect(() => {
+    if (!repeatSeed || guestToEdit) return;
+
+    const seedSignature = JSON.stringify(buildGuestSeedSignature(repeatSeed));
+    if (processedRepeatSeedRef.current === seedSignature) return;
+    processedRepeatSeedRef.current = seedSignature;
+
+    const rawPhone = repeatSeed.phone || "";
+    const match = rawPhone.match(/^(\+\d{1,4})(\d{7,15})$/);
+    const parsedCountryCode = repeatSeed.countryCode || match?.[1] || "+91";
+    const parsedPhone = match?.[2] || rawPhone.replace(/\D/g, "");
+    const parsedProposedRefreshmentTime = repeatSeed.proposedRefreshmentTime
+      ? new Date(repeatSeed.proposedRefreshmentTime).toISOString().slice(0, 16)
+      : "";
+
+    const nextGuest = {
+      category: repeatSeed.category || "Isuzu Employee",
+      firstName: repeatSeed.firstName || "",
+      lastName: repeatSeed.lastName || "",
+      email: repeatSeed.email || "",
+      company: repeatSeed.company || "",
+      host: ssoHostName,
+      onBehalfOf: false,
+      countryCode: parsedCountryCode,
+      phone: parsedPhone,
+      purposeOfVisit: repeatSeed.purposeOfVisit || "",
+      meetingRoom: repeatSeed.meetingRoom || "",
+      meetingRoomRequired: Boolean(repeatSeed.meetingRoomRequired),
+      laptopSerial: repeatSeed.laptopSerial || "",
+      guestWifiRequired: Boolean(repeatSeed.guestWifiRequired),
+      refreshmentRequired: Boolean(repeatSeed.refreshmentRequired),
+      proposedRefreshmentTime: parsedProposedRefreshmentTime,
+      TentativeinTime: "",
+      TentativeoutTime: "",
+      submittedBy: ssoEmail,
+      status: "new",
+    };
+
+    setGuests((prev) => {
+      const hasFilledEntries = prev.some(hasGuestCoreFields);
+      const base = hasFilledEntries ? prev : [];
+      const combined = [...base, nextGuest].slice(0, MAX_GUESTS);
+
+      if (combined.length === base.length) {
+        Swal.fire({ icon: "warning", title: `Maximum ${MAX_GUESTS} guests allowed per submission.` });
+      }
+
+      setOpenIndex(Math.max(0, combined.length - 1));
+      return combined;
+    });
+    setAutofillStates({});
+    if (typeof onRepeatSeedConsumed === "function") onRepeatSeedConsumed();
+  }, [repeatSeed, guestToEdit, ssoEmail, ssoHostName, onRepeatSeedConsumed]);
+
+  useEffect(() => {
+    if (!repeatBatch || guestToEdit || !Array.isArray(repeatBatch) || repeatBatch.length === 0) return;
+
+    const batchSignature = buildGuestBatchSignature(repeatBatch);
+    if (processedRepeatBatchRef.current === batchSignature) return;
+    processedRepeatBatchRef.current = batchSignature;
+
+    const mapped = repeatBatch.slice(0, MAX_GUESTS).map((seed) => {
+      const rawPhone = seed.phone || "";
+      const match = rawPhone.match(/^(\+\d{1,4})(\d{7,15})$/);
+      const parsedCountryCode = seed.countryCode || match?.[1] || "+91";
+      const parsedPhone = match?.[2] || rawPhone.replace(/\D/g, "");
+      const parsedProposedRefreshmentTime = seed.proposedRefreshmentTime
+        ? new Date(seed.proposedRefreshmentTime).toISOString().slice(0, 16)
+        : "";
+      const parsedInTime = seed.TentativeinTime
+        ? seed.TentativeinTime
+        : seed.inTime
+          ? new Date(seed.inTime).toISOString().slice(0, 16)
+          : "";
+      const parsedOutTime = seed.TentativeoutTime
+        ? seed.TentativeoutTime
+        : seed.outTime
+          ? new Date(seed.outTime).toISOString().slice(0, 16)
+          : "";
+
+      return {
+        category: seed.category || "Isuzu Employee",
+        firstName: seed.firstName || "",
+        lastName: seed.lastName || "",
+        email: seed.email || "",
+        company: seed.company || "",
+        host: ssoHostName,
+        onBehalfOf: false,
+        countryCode: parsedCountryCode,
+        phone: parsedPhone,
+        purposeOfVisit: seed.purposeOfVisit || "",
+        meetingRoom: seed.meetingRoom || "",
+        meetingRoomRequired: Boolean(seed.meetingRoomRequired),
+        laptopSerial: seed.laptopSerial || "",
+        guestWifiRequired: Boolean(seed.guestWifiRequired),
+        refreshmentRequired: Boolean(seed.refreshmentRequired),
+        proposedRefreshmentTime: parsedProposedRefreshmentTime,
+        TentativeinTime: parsedInTime,
+        TentativeoutTime: parsedOutTime,
+        submittedBy: ssoEmail,
+        status: "new",
+      };
+    });
+
+    setGuests((prev) => {
+      const hasFilledEntries = prev.some(hasGuestCoreFields);
+      const base = hasFilledEntries ? prev : [];
+      const combined = [...base, ...mapped].slice(0, MAX_GUESTS);
+
+      setOpenIndex(Math.max(0, combined.length - 1));
+      return combined;
+    });
+    setAutofillStates({});
+
+    const hasFilledEntries = guestsRef.current.some(hasGuestCoreFields);
+    const existingCount = hasFilledEntries ? guestsRef.current.length : 0;
+    const availableSlots = Math.max(0, MAX_GUESTS - existingCount);
+    if (repeatBatch.length > availableSlots) {
+      Swal.fire({ icon: "warning", title: `Only first ${availableSlots} guests were added due to form limit.` });
+    }
+
+    if (typeof onRepeatSeedConsumed === "function") onRepeatSeedConsumed();
+  }, [repeatBatch, guestToEdit, ssoEmail, ssoHostName, onRepeatSeedConsumed]);
 
   const handleChange = (index, field, value) => {
     setGuests((prev) =>

@@ -4,11 +4,10 @@ import tt from "../images/logo.png";
 import { FaSignOutAlt, FaFileExcel, FaUser } from "react-icons/fa";
 import { motion } from "framer-motion";
 
-export default function Navbar({ exportToExcel, adhoc }) {
+export default function Navbar({ exportToExcel, adhoc, profileAction, profileLabel = "Repeat Visitors", profileTooltip = "View repeat visitor and guest history", userName = "Security" }) {
   const navigate = useNavigate();
 
   // ✅ Force logged-in state
-  const userName = "Security";
   const isLoggedIn = true;
 
   const handleLogout = () => {
@@ -55,6 +54,23 @@ export default function Navbar({ exportToExcel, adhoc }) {
               >
                 <FaUser className="me-2" />
                 Ad-hoc
+              </motion.button>
+            )}
+
+            {typeof profileAction === "function" && (
+              <motion.button
+                className="custom-btn d-flex align-items-center px-3 py-1"
+                onClick={profileAction}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                title={profileTooltip}
+                style={{
+                  background: "linear-gradient(135deg, #D8B200, #F08C00)",
+                  color: "#111",
+                }}
+              >
+                <FaUser className="me-2" />
+                {profileLabel}
               </motion.button>
             )}
 
