@@ -28,10 +28,6 @@ export default function Navbar({ exportToExcel, adhoc, profileAction, profileLab
 
         {isLoggedIn && (
           <div className="d-flex align-items-center gap-2">
-            <span className="text-dark fw-semibold me-2">
-              Welcome, {userName}
-            </span>
-
             {typeof exportToExcel === "function" && (
               <motion.button
                 className="custom-btn d-flex align-items-center px-3 py-1"
@@ -59,18 +55,57 @@ export default function Navbar({ exportToExcel, adhoc, profileAction, profileLab
 
             {typeof profileAction === "function" && (
               <motion.button
-                className="custom-btn d-flex align-items-center px-3 py-1"
                 onClick={profileAction}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
+                whileHover={{ scale: 1.03, boxShadow: "0 0 0 2px #D8B200" }}
+                whileTap={{ scale: 0.97 }}
                 title={profileTooltip}
                 style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
                   background: "linear-gradient(135deg, #D8B200, #F08C00)",
-                  color: "#111",
+                  border: "none",
+                  borderRadius: "50px",
+                  padding: "5px 14px 5px 6px",
+                  cursor: "pointer",
+                  transition: "box-shadow 0.2s",
                 }}
               >
-                <FaUser className="me-2" />
-                {profileLabel}
+                {/* Avatar circle */}
+                <span style={{
+                  width: "28px",
+                  height: "28px",
+                  borderRadius: "50%",
+                  background: "#111",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#D8B200",
+                  fontWeight: 800,
+                  fontSize: "0.8rem",
+                  flexShrink: 0,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.02em",
+                }}>
+                  {(() => {
+                    const parts = (userName || "U").trim().split(/\s+/);
+                    return parts.length > 1
+                      ? parts[0].charAt(0) + parts[parts.length - 1].charAt(0)
+                      : parts[0].charAt(0);
+                  })()}
+                </span>
+                {/* Name */}
+                <span style={{
+                  color: "#111",
+                  fontWeight: 700,
+                  fontSize: "0.82rem",
+                  whiteSpace: "nowrap",
+                  maxWidth: "140px",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}>
+                  {userName || "Profile"}
+                </span>
               </motion.button>
             )}
 
