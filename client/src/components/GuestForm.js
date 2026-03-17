@@ -251,9 +251,6 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit, repeat
     const phoneParts = splitPhoneByCountryCode(repeatSeed.phone, repeatSeed.countryCode, COUNTRY_CODES);
     const parsedCountryCode = phoneParts.countryCode;
     const parsedPhone = phoneParts.phone;
-    const parsedProposedRefreshmentTime = repeatSeed.proposedRefreshmentTime
-      ? new Date(repeatSeed.proposedRefreshmentTime).toISOString().slice(0, 16)
-      : "";
 
     const nextGuest = {
       category: repeatSeed.category || "Isuzu Employee",
@@ -266,12 +263,12 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit, repeat
       countryCode: parsedCountryCode,
       phone: parsedPhone,
       purposeOfVisit: repeatSeed.purposeOfVisit || "",
-      meetingRoom: repeatSeed.meetingRoom || "",
-      meetingRoomRequired: Boolean(repeatSeed.meetingRoomRequired),
+      meetingRoom: "",
+      meetingRoomRequired: false,
       laptopSerial: repeatSeed.laptopSerial || "",
-      guestWifiRequired: Boolean(repeatSeed.guestWifiRequired),
-      refreshmentRequired: Boolean(repeatSeed.refreshmentRequired),
-      proposedRefreshmentTime: parsedProposedRefreshmentTime,
+      guestWifiRequired: false,
+      refreshmentRequired: false,
+      proposedRefreshmentTime: "",
       TentativeinTime: "",
       TentativeoutTime: "",
       submittedBy: ssoEmail,
@@ -305,9 +302,6 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit, repeat
       const phoneParts = splitPhoneByCountryCode(seed.phone, seed.countryCode, COUNTRY_CODES);
       const parsedCountryCode = phoneParts.countryCode;
       const parsedPhone = phoneParts.phone;
-      const parsedProposedRefreshmentTime = seed.proposedRefreshmentTime
-        ? new Date(seed.proposedRefreshmentTime).toISOString().slice(0, 16)
-        : "";
       const parsedInTime = seed.TentativeinTime
         ? seed.TentativeinTime
         : seed.inTime
@@ -330,12 +324,12 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit, repeat
         countryCode: parsedCountryCode,
         phone: parsedPhone,
         purposeOfVisit: seed.purposeOfVisit || "",
-        meetingRoom: seed.meetingRoom || "",
-        meetingRoomRequired: Boolean(seed.meetingRoomRequired),
+        meetingRoom: "",
+        meetingRoomRequired: false,
         laptopSerial: seed.laptopSerial || "",
-        guestWifiRequired: Boolean(seed.guestWifiRequired),
-        refreshmentRequired: Boolean(seed.refreshmentRequired),
-        proposedRefreshmentTime: parsedProposedRefreshmentTime,
+        guestWifiRequired: false,
+        refreshmentRequired: false,
+        proposedRefreshmentTime: "",
         TentativeinTime: parsedInTime,
         TentativeoutTime: parsedOutTime,
         submittedBy: ssoEmail,
