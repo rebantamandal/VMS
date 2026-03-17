@@ -17,7 +17,6 @@ const SOURCE_STYLE = {
 const CONTROL_HEIGHT = "36px";
 const CONTROL_FONT = "0.82rem";
 const CONTROL_PADDING = "0 12px";
-const CONTROL_MIN_WIDTH = "140px";
 
 const normalize = (value) => String(value || "").trim().toLowerCase();
 const normalizePhone = (value) => String(value || "").replace(/\D/g, "");
@@ -201,19 +200,24 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
     [selectedRows]
   );
 
+  const selectedEntries = useMemo(
+    () => historyRows.filter((row) => selectedRows[row.personKey || `${row.source}-${row._id}`]),
+    [historyRows, selectedRows]
+  );
+
   const selectedSource = useMemo(() => {
-    const firstSelected = filteredRows.find((row) => selectedRows[row.personKey || `${row.source}-${row._id}`]);
+    const firstSelected = selectedEntries[0];
     return firstSelected?.source || null;
-  }, [filteredRows, selectedRows]);
+  }, [selectedEntries]);
 
   const selectedVisitorRows = useMemo(
-    () => filteredRows.filter((row) => selectedRows[row.personKey || `${row.source}-${row._id}`] && row.source === "visitor"),
-    [filteredRows, selectedRows]
+    () => selectedEntries.filter((row) => row.source === "visitor"),
+    [selectedEntries]
   );
 
   const selectedGuestRows = useMemo(
-    () => filteredRows.filter((row) => selectedRows[row.personKey || `${row.source}-${row._id}`] && row.source === "guest"),
-    [filteredRows, selectedRows]
+    () => selectedEntries.filter((row) => row.source === "guest"),
+    [selectedEntries]
   );
 
   const isBulkTimeRequired = selectedKeys.length > 1 && Boolean(selectedSource);
@@ -222,15 +226,6 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
   const isBulkTimeRangeValid =
     !isBulkTimeRequired ||
     (isBulkTimeComplete && !isBulkTimeInvalid);
-
-  const selectableRows = useMemo(
-    () => filteredRows.filter((row) => !selectedSource || row.source === selectedSource),
-    [filteredRows, selectedSource]
-  );
-
-  const areAllSelectableSelected =
-    selectableRows.length > 0 &&
-    selectableRows.every((row) => selectedRows[row.personKey || `${row.source}-${row._id}`]);
 
   const visitorCount = historyRows.filter((r) => r.source === "visitor").length;
   const guestCount   = historyRows.filter((r) => r.source === "guest").length;
@@ -252,31 +247,6 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
       }
       return next;
     });
-  };
-
-  const toggleSelectAllVisible = () => {
-    if (areAllSelectableSelected) {
-      // Unselect all selectable rows
-      setSelectedRows((prev) => {
-        const next = { ...prev };
-        selectableRows.forEach((row) => {
-          delete next[row.personKey || `${row.source}-${row._id}`];
-        });
-        return next;
-      });
-    } else {
-      // Select up to MAX_SELECTION
-      setSelectedRows((prev) => {
-        const next = { ...prev };
-        let count = selectedKeys.length;
-        for (const row of selectableRows) {
-          if (count >= MAX_SELECTION) break;
-          const key = row.personKey || `${row.source}-${row._id}`;
-          if (!next[key]) { next[key] = true; count++; }
-        }
-        return next;
-      });
-    }
   };
 
   const openRepeatForm = (row) => {
@@ -403,7 +373,7 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
             exit={{ opacity: 0, y: 20, scale: 0.97 }}
             transition={{ duration: 0.22 }}
             className="position-absolute top-50 start-50 translate-middle bg-white rounded-4 shadow-lg d-flex flex-column"
-            style={{ width: "min(94vw, 860px)", maxHeight: "88vh" }}
+            style={{ width: "min(94vw, 860px)", maxHeight: "88vh", borderRadius: "18px", overflow: "hidden" }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* ── Header ── */}
@@ -443,70 +413,68 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
 
             {/* ── Toolbar ── */}
             <div className="px-4 pt-3 pb-2 border-bottom" style={{ background: "#fff" }}>
-              {/* Search */}
-              <div className="input-group mb-2">
-                <span className="input-group-text bg-white text-muted border-end-0">
-                  <FaSearch size={13} />
-                </span>
-                <input
-                  type="text"
-                  className="form-control border-start-0 ps-0"
-                  placeholder="Search by name, email or phone…"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
-                {searchQuery && (
-                  <button className="btn btn-outline-secondary border-start-0" type="button"
-                    onClick={() => setSearchQuery("")} title="Clear search">
-                    <FaTimes size={12} />
-                  </button>
-                )}
-              </div>
+              {/* Search + multi-select tools */}
+              <div className="d-flex align-items-center flex-wrap gap-2 mb-2">
+                <div className="input-group flex-grow-1" style={{ minWidth: "280px", height: CONTROL_HEIGHT }}>
+                  <span className="input-group-text bg-white text-muted border-end-0" style={{ height: CONTROL_HEIGHT }}>
+                    <FaSearch size={13} />
+                  </span>
+                  <input
+                    type="text"
+                    className="form-control border-start-0 ps-0"
+                    style={{ height: CONTROL_HEIGHT }}
+                    placeholder="Search by name, email or phone…"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                  {searchQuery && (
+                    <button className="btn btn-outline-secondary border-start-0" type="button"
+                      style={{ height: CONTROL_HEIGHT }}
+                      onClick={() => setSearchQuery("")} title="Clear search">
+                      <FaTimes size={12} />
+                    </button>
+                  )}
+                </div>
 
-              {/* Multi-select toggle */}
-              <div className="d-flex align-items-center justify-content-between flex-wrap gap-2">
-                <div className="d-flex align-items-center gap-2">
+                <div className="d-flex align-items-center gap-2 flex-wrap" style={{ minHeight: CONTROL_HEIGHT }}>
                   <button
                     type="button"
-                    className={`btn btn-sm ${selectMultipleMode ? "btn-dark" : "btn-outline-secondary"}`}
-                    style={{ fontSize: CONTROL_FONT, minWidth: CONTROL_MIN_WIDTH, height: CONTROL_HEIGHT, padding: CONTROL_PADDING }}
+                    className={`btn btn-sm d-inline-flex align-items-center justify-content-center ${selectMultipleMode ? "btn-dark" : "btn-outline-secondary"}`}
+                    style={{ fontSize: CONTROL_FONT, height: CONTROL_HEIGHT, padding: "0 14px", borderRadius: "999px", whiteSpace: "nowrap" }}
                     onClick={toggleSelectMultipleMode}
                   >
-                    {selectMultipleMode ? "✕  Cancel Selection" : "☑  Select Multiple"}
+                    {selectMultipleMode ? "Cancel Selection" : "Select Multiple"}
                   </button>
 
                   {selectMultipleMode && (
-                    <>
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-secondary"
-                        style={{ fontSize: CONTROL_FONT, minWidth: CONTROL_MIN_WIDTH, height: CONTROL_HEIGHT, padding: CONTROL_PADDING }}
-                        onClick={toggleSelectAllVisible}
-                        disabled={selectableRows.length === 0}
-                      >
-                        {areAllSelectableSelected ? "Unselect All" : "Select All"}
-                      </button>
-
-                      {selectedSource ? (
-                        <span className="badge rounded-pill d-inline-flex align-items-center gap-1 fs-small"
-                          style={{
+                    <span className="badge rounded-pill d-inline-flex align-items-center gap-1"
+                      style={selectedSource
+                        ? {
                             ...(SOURCE_STYLE[selectedSource]?.badge || {}),
-                            fontSize: "0.78rem", padding: "4px 10px",
+                            fontSize: "0.78rem",
+                            padding: "7px 11px",
+                            height: CONTROL_HEIGHT,
+                          }
+                        : {
+                            fontSize: "0.78rem",
+                            padding: "7px 11px",
+                            height: CONTROL_HEIGHT,
+                            background: "#f1f5f9",
+                            color: "#475569",
+                            border: "1px solid #cbd5e1",
                           }}>
-                          {selectedSource === "visitor" ? <FaUserTie size={11} /> : <FaUserFriends size={11} />}
-                          {selectedKeys.length}/{MAX_SELECTION} {selectedSource === "visitor" ? "Visitors" : "Guests"}
-                        </span>
-                      ) : (
-                        <span className="text-muted" style={{ fontSize: "0.8rem" }}>0 selected</span>
-                      )}
-                    </>
+                      {selectedSource === "visitor" ? <FaUserTie size={11} /> : selectedSource === "guest" ? <FaUserFriends size={11} /> : null}
+                      {selectedSource
+                        ? `${selectedKeys.length}/${MAX_SELECTION} ${selectedSource === "visitor" ? "Visitors" : "Guests"}`
+                        : `0/${MAX_SELECTION} Selected`}
+                    </span>
                   )}
                 </div>
               </div>
 
               {/* Type-lock hint */}
               {selectMultipleMode && selectedSource && (
-                <div className="mt-2 rounded-3 px-3 py-2 d-flex align-items-center gap-2"
+                <div className="rounded-3 px-3 py-2 d-flex align-items-center gap-2"
                   style={{ background: SOURCE_STYLE[selectedSource]?.badge?.background || "#f1f5f9",
                            border: `1px solid ${SOURCE_STYLE[selectedSource]?.border || "#cbd5e1"}`,
                            fontSize: "0.82rem" }}>
@@ -617,7 +585,7 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
                                         color: "#fff",
                                         border: "none",
                                         fontSize: CONTROL_FONT,
-                                        minWidth: "110px",
+                                        minWidth: "130px",
                                         height: CONTROL_HEIGHT,
                                         padding: CONTROL_PADDING,
                                       }}
@@ -711,6 +679,7 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
                           <input
                             type="datetime-local"
                             className="form-control form-control-sm border-0 p-0 w-100"
+                            min={bulkTentativeInTime || undefined}
                             value={bulkTentativeOutTime}
                             onChange={(e) => setBulkTentativeOutTime(e.target.value)}
                             title="Tentative Out"
@@ -729,8 +698,8 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
                   )}
 
                   {/* Row 2: counter left, buttons right — always fits */}
-                  <div className="d-flex align-items-center justify-content-between">
-                    <span className="fw-semibold" style={{ fontSize: "0.88rem" }}>
+                  <div className="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                    <span className="fw-semibold text-nowrap" style={{ fontSize: "0.88rem" }}>
                       {selectedKeys.length} of {MAX_SELECTION} selected
                       {selectedSource && (
                         <span className="ms-1 text-muted fw-normal">
@@ -738,7 +707,7 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
                         </span>
                       )}
                     </span>
-                    <div className="d-flex gap-2">
+                    <div className="d-flex gap-2 align-items-center">
                       <button
                         type="button"
                         className="btn btn-sm btn-outline-danger d-inline-flex align-items-center justify-content-center"

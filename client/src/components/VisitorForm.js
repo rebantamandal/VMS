@@ -28,6 +28,22 @@ const PHONE_HINTS = {
   "+46": "7–9 digits",
 };
 
+const COUNTRY_CODES = [
+  { code: "+91", label: "India (+91)" },
+  { code: "+81", label: "Japan (+81)" },
+  { code: "+971", label: "UAE (+971)" },
+  { code: "+65", label: "Singapore (+65)" },
+  { code: "+66", label: "Thailand (+66)" },
+  { code: "+86", label: "China (+86)" },
+  { code: "+27", label: "South Africa (+27)" },
+  { code: "+1", label: "USA (+1)" },
+  { code: "+44", label: "UK (+44)" },
+  { code: "+49", label: "Germany (+49)" },
+  { code: "+33", label: "France (+33)" },
+  { code: "+61", label: "Australia (+61)" },
+  { code: "+46", label: "Sweden (+46)" },
+];
+
 // Flag emoji per country code
 const COUNTRY_FLAGS = {
   "+91": "🇮🇳",
@@ -81,6 +97,32 @@ const buildVisitorBatchSignature = (batch) =>
     }))
   );
 
+const splitPhoneByCountryCode = (rawPhone, explicitCountryCode, codeOptions) => {
+  const raw = String(rawPhone || "").trim();
+  const digits = raw.replace(/\D/g, "");
+  const codes = (codeOptions || [])
+    .map((item) => item.code)
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length);
+
+  if (explicitCountryCode) {
+    const explicitDigits = explicitCountryCode.replace(/\D/g, "");
+    if (digits.startsWith(explicitDigits) && digits.length > explicitDigits.length) {
+      return { countryCode: explicitCountryCode, phone: digits.slice(explicitDigits.length) };
+    }
+    return { countryCode: explicitCountryCode, phone: digits };
+  }
+
+  for (const code of codes) {
+    const ccDigits = code.replace(/\D/g, "");
+    if (digits.startsWith(ccDigits) && digits.length > ccDigits.length) {
+      return { countryCode: code, phone: digits.slice(ccDigits.length) };
+    }
+  }
+
+  return { countryCode: "+91", phone: digits };
+};
+
 export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit, repeatSeed, repeatBatch, onRepeatSeedConsumed }) {
   const { accounts } = useMsal();
 
@@ -97,22 +139,6 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit, re
     currentAccount?.idTokenClaims?.email ||
     "Unknown User";
   console.log("Logged-in user email:", ssoEmail);
-
-  const COUNTRY_CODES = [
-    { code: "+91", label: "India (+91)" },
-    { code: "+81", label: "Japan (+81)" },
-    { code: "+971", label: "UAE (+971)" },
-    { code: "+65", label: "Singapore (+65)" },
-    { code: "+66", label: "Thailand (+66)" },
-    { code: "+86", label: "China (+86)" },
-    { code: "+27", label: "South Africa (+27)" },
-    { code: "+1", label: "USA (+1)" },
-    { code: "+44", label: "UK (+44)" },
-    { code: "+49", label: "Germany (+49)" },
-    { code: "+33", label: "France (+33)" },
-    { code: "+61", label: "Australia (+61)" },
-    { code: "+46", label: "Sweden (+46)" },
-  ];
 
   const emptyVisitor = {
     category: "Visitor",
@@ -177,10 +203,9 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit, re
 
   useEffect(() => {
     if (visitorToEdit) {
-      const rawPhone = visitorToEdit.phone || "";
-      const match = rawPhone.match(/^(\+\d{1,4})(\d{7,15})$/);
-      const parsedCountryCode = visitorToEdit.countryCode || match?.[1] || "+91";
-      const parsedPhone = match?.[2] || rawPhone;
+      const phoneParts = splitPhoneByCountryCode(visitorToEdit.phone, visitorToEdit.countryCode, COUNTRY_CODES);
+      const parsedCountryCode = phoneParts.countryCode;
+      const parsedPhone = phoneParts.phone;
 
       setVisitors([{
         ...visitorToEdit,
@@ -206,10 +231,9 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit, re
     if (processedRepeatSeedRef.current === seedSignature) return;
     processedRepeatSeedRef.current = seedSignature;
 
-    const rawPhone = repeatSeed.phone || "";
-    const match = rawPhone.match(/^(\+\d{1,4})(\d{7,15})$/);
-    const parsedCountryCode = repeatSeed.countryCode || match?.[1] || "+91";
-    const parsedPhone = match?.[2] || rawPhone.replace(/\D/g, "");
+    const phoneParts = splitPhoneByCountryCode(repeatSeed.phone, repeatSeed.countryCode, COUNTRY_CODES);
+    const parsedCountryCode = phoneParts.countryCode;
+    const parsedPhone = phoneParts.phone;
 
     const nextVisitor = {
       category: repeatSeed.category || "Visitor",
@@ -255,10 +279,9 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit, re
     processedRepeatBatchRef.current = batchSignature;
 
     const mapped = repeatBatch.slice(0, MAX_VISITORS).map((seed) => {
-      const rawPhone = seed.phone || "";
-      const match = rawPhone.match(/^(\+\d{1,4})(\d{7,15})$/);
-      const parsedCountryCode = seed.countryCode || match?.[1] || "+91";
-      const parsedPhone = match?.[2] || rawPhone.replace(/\D/g, "");
+      const phoneParts = splitPhoneByCountryCode(seed.phone, seed.countryCode, COUNTRY_CODES);
+      const parsedCountryCode = phoneParts.countryCode;
+      const parsedPhone = phoneParts.phone;
       const parsedInTime = seed.TentativeinTime
         ? seed.TentativeinTime
         : seed.inTime
