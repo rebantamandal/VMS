@@ -357,23 +357,22 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
       return;
     }
 
-    const rowsForExport = visits.map((visit, index) => {
-      const normalizedEntries = Object.entries(visit).reduce((acc, [key, value]) => {
-        if (value === null || value === undefined) {
-          acc[key] = "";
-        } else if (typeof value === "object") {
-          acc[key] = JSON.stringify(value);
-        } else {
-          acc[key] = value;
-        }
-        return acc;
-      }, {});
-
-      return {
-        serialNumber: index + 1,
-        ...normalizedEntries,
-      };
-    });
+    // Only include important fields in export
+    const rowsForExport = visits.map((visit, index) => ({
+      serialNumber: index + 1,
+      Category: visit.category || "",
+      firstName: visit.firstName || "",
+      lastName: visit.lastName || "",
+      email: visit.email || "",
+      company: visit.company || "",
+      countryCode: visit.countryCode || "",
+      phone: visit.phone || "",
+      purposeOfVisit: visit.purposeOfVisit || "",
+      tentativeIn: visit.inTime || "",
+      tentativeOut: visit.outTime || "",
+      actualIn: visit.actualInTime || "",
+      actualOut: visit.actualOutTime || ""
+    }));
 
     const worksheet = XLSX.utils.json_to_sheet(rowsForExport);
     const workbook = XLSX.utils.book_new();
@@ -405,7 +404,7 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
             exit={{ opacity: 0, y: 20, scale: 0.97 }}
             transition={{ duration: 0.22 }}
             className="position-absolute top-50 start-50 translate-middle bg-white rounded-4 shadow-lg d-flex flex-column"
-            style={{ width: "min(94vw, 860px)", maxHeight: "88vh", borderRadius: "18px", overflow: "hidden" }}
+            style={{ width: "min(94vw, 860px)", maxHeight: "88vh", borderRadius: "18px", overflow: "hidden", fontFamily: "Arial, sans-serif" }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* ── Header ── */}
