@@ -20,6 +20,18 @@ const CONTROL_PADDING = "0 12px";
 
 const normalize = (value) => String(value || "").trim().toLowerCase();
 const normalizePhone = (value) => String(value || "").replace(/\D/g, "");
+const padDatePart = (value) => String(value).padStart(2, "0");
+
+const formatExportDateTime = (value) => {
+  if (!value) return "";
+
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value);
+  }
+
+  return `${parsed.getFullYear()}-${padDatePart(parsed.getMonth() + 1)}-${padDatePart(parsed.getDate())} ${padDatePart(parsed.getHours())}:${padDatePart(parsed.getMinutes())}`;
+};
 
 const buildPersonKey = (row) => {
   const first = normalize(row.firstName);
@@ -389,10 +401,10 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
       countryCode: visit.countryCode || "",
       phone: visit.phone || "",
       purposeOfVisit: visit.purposeOfVisit || "",
-      tentativeIn: visit.inTime || "",
-      tentativeOut: visit.outTime || "",
-      actualIn: visit.actualInTime || "",
-      actualOut: visit.actualOutTime || ""
+      tentativeIn: formatExportDateTime(visit.inTime),
+      tentativeOut: formatExportDateTime(visit.outTime),
+      actualIn: formatExportDateTime(visit.actualInTime),
+      actualOut: formatExportDateTime(visit.actualOutTime)
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(rowsForExport);
