@@ -137,14 +137,6 @@ const normalizeHeader = (value) =>
 
 const toText = (value) => String(value ?? "").trim();
 
-const toBool = (value) => {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "number") return value === 1;
-  const normalized = toText(value).toLowerCase();
-  if (!normalized) return false;
-  return ["true", "yes", "y", "1"].includes(normalized);
-};
-
 const parseBooleanStrict = (value) => {
   if (value === null || value === undefined || value === "") {
     return { valid: true, value: false, provided: false };
