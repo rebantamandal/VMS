@@ -7,6 +7,7 @@ import Swal from "sweetalert2";
 //--------------------------changed by rebanta------------------------------//
 import { validatePhoneLength } from "../utils/phoneUtils";
 import duplicateIcon from "../images/duplicate.png";
+import BulkUploadModal from "./BulkUploadModal";
 //--------------------------changed by rebanta------------------------------//
 
 const MAX_GUESTS = 10;
@@ -171,6 +172,7 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit, repeat
   const [openIndex, setOpenIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const [autofillStates, setAutofillStates] = useState({});
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
   const guestsRef = useRef(guests);
   const processedRepeatSeedRef = useRef("");
   const processedRepeatBatchRef = useRef("");
@@ -547,9 +549,20 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit, repeat
       exit={{ x: isMobile ? 0 : 200, opacity: 0 }}
       transition={{ duration: 0.5 }}
     >
-      <h3 className="fw-bold text-center mb-4">
-        {guestToEdit ? "Edit Guest" : "Guest Details"}
-      </h3>
+      <div className="d-flex justify-content-between align-items-center mb-4">
+        <h3 className="fw-bold text-center mb-0">
+          {guestToEdit ? "Edit Guest" : "Guest Details"}
+        </h3>
+        {!guestToEdit && (
+          <button
+            type="button"
+            className="btn btn-outline-dark btn-sm"
+            onClick={() => setShowBulkUpload(true)}
+          >
+            Bulk Upload
+          </button>
+        )}
+      </div>
 
       <form onSubmit={handleSubmit} className="d-flex flex-column gap-3">
         {guests.map((guest, index) => (
@@ -896,6 +909,14 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit, repeat
         .toggle-circle { width: 20px; height: 20px; background: #fff; border-radius: 50%; transition: transform 0.3s ease; }
         .wifi-toggle.active .toggle-circle { transform: translateX(24px); }
       `}</style>
+
+      <BulkUploadModal
+        show={showBulkUpload}
+        type="guest"
+        hostName={ssoHostName}
+        submittedBy={ssoEmail}
+        onClose={() => setShowBulkUpload(false)}
+      />
     </motion.div>
   );
 }

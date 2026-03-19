@@ -11,8 +11,8 @@ const MAX_SELECTION = 10;
 const CHECKED_OUT_STATUS = "checkedout";
 const NON_IDENTITIES = new Set(["", "unknown user", "employee", "security"]);
 const SOURCE_STYLE = {
-  visitor: { border: "#3b82f6", badge: { background: "#dbeafe", color: "#1d4ed8", border: "1px solid #93c5fd" } },
-  guest:   { border: "#10b981", badge: { background: "#d1fae5", color: "#065f46", border: "1px solid #6ee7b7" } },
+  visitor: { border: "#D8B200", badge: { background: "#fff8dc", color: "#6b5600", border: "1px solid #efdca0" } },
+  guest:   { border: "#F08C00", badge: { background: "#fff2e0", color: "#7a4a00", border: "1px solid #f2d2a6" } },
 };
 const CONTROL_HEIGHT = "36px";
 const CONTROL_FONT = "0.82rem";
@@ -243,11 +243,32 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
   const visitorCount = historyRows.filter((r) => r.source === "visitor").length;
   const guestCount   = historyRows.filter((r) => r.source === "guest").length;
 
-  const toggleSelection = (key) => {
-    setSelectedRows((prev) => ({
-      ...prev,
-      [key]: !prev[key],
-    }));
+  const toggleSelection = (row) => {
+    const key = row.personKey || `${row.source}-${row._id}`;
+
+    setSelectedRows((prev) => {
+      const isAlreadySelected = Boolean(prev[key]);
+      if (isAlreadySelected) {
+        return {
+          ...prev,
+          [key]: false,
+        };
+      }
+
+      const nextSelectedKeys = Object.keys(prev).filter((selectedKey) => prev[selectedKey]);
+      if (nextSelectedKeys.length >= MAX_SELECTION) {
+        return prev;
+      }
+
+      if (selectedSource && row.source !== selectedSource) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        [key]: true,
+      };
+    });
   };
 
   const toggleSelectMultipleMode = () => {
@@ -327,7 +348,7 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
           TentativeinTime: bulkTentativeInTime,
           TentativeoutTime: bulkTentativeOutTime,
         }))
-      : chosen;
+      : chosen[0];
 
     if (typeof onRepeatMultiSelect === "function") {
       onRepeatMultiSelect({
@@ -408,59 +429,59 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
             onClick={(e) => e.stopPropagation()}
           >
             {/* ── Header ── */}
-            <div className="px-4 py-3 border-bottom" style={{ background: "linear-gradient(135deg, #f8fafc, #f1f5f9)" }}>
+            <div className="px-4 py-3" style={{ background: "#fff8dc", boxShadow: "0 4px 12px rgba(216, 178, 0, 0.14)", borderBottom: "3px solid #D8B200" }}>
               <div className="d-flex align-items-start justify-content-between gap-3">
                 <div>
-                  <h5 className="mb-1 fw-bold d-flex align-items-center gap-2">
-                    <FaLayerGroup className="text-primary" />
+                  <h5 className="mb-1 fw-bold d-flex align-items-center gap-2" style={{ color: "#5f4b00", fontSize: "1.4rem", letterSpacing: "0.3px", fontWeight: "700" }}>
+                    <FaLayerGroup style={{ fontSize: "1.5rem" }} />
                     Previous Visitors &amp; Guests
                   </h5>
-                  <div className="d-flex align-items-center gap-2 flex-wrap mt-1">
+                  <div className="d-flex align-items-center gap-2 flex-wrap mt-2">
                     {visitorCount > 0 && (
                       <span className="badge rounded-pill d-inline-flex align-items-center gap-1"
-                        style={SOURCE_STYLE.visitor.badge}>
-                        <FaUserTie size={11} /> {visitorCount} {visitorCount === 1 ? "Visitor" : "Visitors"}
+                        style={{ ...SOURCE_STYLE.visitor.badge, fontSize: "0.88rem", padding: "7px 12px", boxShadow: "0 2px 8px rgba(216, 178, 0, 0.16)", fontWeight: "600" }}>
+                        <FaUserTie size={12} /> {visitorCount} {visitorCount === 1 ? "Visitor" : "Visitors"}
                       </span>
                     )}
                     {guestCount > 0 && (
                       <span className="badge rounded-pill d-inline-flex align-items-center gap-1"
-                        style={SOURCE_STYLE.guest.badge}>
-                        <FaUserFriends size={11} /> {guestCount} {guestCount === 1 ? "Guest" : "Guests"}
+                        style={{ ...SOURCE_STYLE.guest.badge, fontSize: "0.88rem", padding: "7px 12px", boxShadow: "0 2px 8px rgba(240, 140, 0, 0.16)", fontWeight: "600" }}>
+                        <FaUserFriends size={12} /> {guestCount} {guestCount === 1 ? "Guest" : "Guests"}
                       </span>
                     )}
                     {isUnknownIdentity && (
-                      <span className="badge rounded-pill bg-warning-subtle text-warning-emphasis border">
+                      <span className="rounded-pill d-inline-flex align-items-center" style={{ background: "#fff8dc", color: "#6b5600", border: "1px solid #efdca0", fontSize: "0.88rem", padding: "7px 12px", fontWeight: "600" }}>
                         Showing all (local / not signed in)
                       </span>
                     )}
                   </div>
                 </div>
-                <button type="button" className="btn btn-outline-danger btn-sm mt-1 flex-shrink-0" onClick={onClose}
-                  title="Close" style={{ height: "32px", width: "32px", padding: 0 }}>
-                  <FaTimes />
+                <button type="button" className="btn btn-outline-danger btn-sm flex-shrink-0" onClick={onClose}
+                  title="Close" style={{ height: "38px", width: "38px", padding: 0, borderRadius: "50%" }}>
+                  <FaTimes size={14} />
                 </button>
               </div>
             </div>
 
             {/* ── Toolbar ── */}
-            <div className="px-4 pt-3 pb-2 border-bottom" style={{ background: "#fff" }}>
+            <div className="px-4 pt-3 pb-3" style={{ background: "#f8f9fa", borderBottom: "1px solid #dee2e6" }}>
               {/* Search + multi-select tools */}
-              <div className="d-flex align-items-center flex-wrap gap-2 mb-2">
-                <div className="input-group flex-grow-1" style={{ minWidth: "280px", height: CONTROL_HEIGHT }}>
-                  <span className="input-group-text bg-white text-muted border-end-0" style={{ height: CONTROL_HEIGHT }}>
+              <div className="d-flex align-items-center flex-wrap gap-3 mb-3">
+                <div className="input-group flex-grow-1" style={{ minWidth: "280px", height: CONTROL_HEIGHT, borderRadius: "8px", overflow: "hidden" }}>
+                  <span className="input-group-text" style={{ height: CONTROL_HEIGHT, background: "#fff", color: "#6b7280", border: "1px solid #dee2e6", borderRight: "none" }}>
                     <FaSearch size={13} />
                   </span>
                   <input
                     type="text"
-                    className="form-control border-start-0 ps-0"
-                    style={{ height: CONTROL_HEIGHT }}
-                    placeholder="Search by name, email or phone…"
+                    className="form-control"
+                    style={{ height: CONTROL_HEIGHT, border: "1px solid #dee2e6", borderLeft: "none", fontSize: "0.95rem", fontWeight: "500", color: "#1e293b" }}
+                    placeholder="Search by name, email or phone..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                   />
                   {searchQuery && (
-                    <button className="btn btn-outline-secondary border-start-0" type="button"
-                      style={{ height: CONTROL_HEIGHT }}
+                    <button className="btn" type="button"
+                      style={{ height: CONTROL_HEIGHT, background: "transparent", border: "1px solid #dee2e6", borderLeft: "none", color: "#c28f00", cursor: "pointer" }}
                       onClick={() => setSearchQuery("")} title="Clear search">
                       <FaTimes size={12} />
                     </button>
@@ -470,8 +491,8 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
                 <div className="d-flex align-items-center gap-2 flex-wrap" style={{ minHeight: CONTROL_HEIGHT }}>
                   <button
                     type="button"
-                    className={`btn btn-sm d-inline-flex align-items-center justify-content-center gap-2 ${selectMultipleMode ? "btn-dark" : "btn-outline-secondary"}`}
-                    style={{ fontSize: CONTROL_FONT, height: CONTROL_HEIGHT, padding: "0 14px", borderRadius: "999px", whiteSpace: "nowrap" }}
+                    className="btn btn-sm"
+                    style={selectMultipleMode ? { fontSize: CONTROL_FONT, height: CONTROL_HEIGHT, padding: "0 16px", borderRadius: "6px", whiteSpace: "nowrap", fontWeight: "600", background: "#D8B200", color: "#1f2937", border: "none" } : { fontSize: CONTROL_FONT, height: CONTROL_HEIGHT, padding: "0 16px", borderRadius: "6px", whiteSpace: "nowrap", fontWeight: "600", background: "transparent", color: "#a87700", border: "1.5px solid #D8B200" }}
                     onClick={toggleSelectMultipleMode}
                   >
                     {selectMultipleMode ? "Exit Multi-Select" : "Select Multiple"}
@@ -511,14 +532,8 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
                       <button
                         key={option.key}
                         type="button"
-                        className={`btn btn-sm ${isActive ? "btn-dark" : "btn-outline-secondary"}`}
-                        style={{
-                          fontSize: CONTROL_FONT,
-                          height: CONTROL_HEIGHT,
-                          padding: "0 14px",
-                          borderRadius: "999px",
-                          whiteSpace: "nowrap",
-                        }}
+                        className="btn btn-sm"
+                        style={isActive ? { fontSize: CONTROL_FONT, height: CONTROL_HEIGHT, padding: "0 16px", borderRadius: "6px", whiteSpace: "nowrap", fontWeight: "600", background: "#D8B200", color: "#1f2937", border: "none" } : { fontSize: CONTROL_FONT, height: CONTROL_HEIGHT, padding: "0 16px", borderRadius: "6px", whiteSpace: "nowrap", fontWeight: "600", background: "transparent", color: "#a87700", border: "1.5px solid #D8B200" }}
                         onClick={() => handleSourceFilterChange(option.key)}
                       >
                         {option.label} ({option.count})
@@ -530,17 +545,14 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
 
               {/* Type-lock hint */}
               {selectMultipleMode && selectionScopeSource && (
-                <div className="rounded-3 px-3 py-2 d-flex align-items-center gap-2"
-                  style={{ background: SOURCE_STYLE[selectionScopeSource]?.badge?.background || "#f1f5f9",
-                           border: `1px solid ${SOURCE_STYLE[selectionScopeSource]?.border || "#cbd5e1"}`,
-                           fontSize: "0.82rem" }}>
-                  <span style={{ color: SOURCE_STYLE[selectionScopeSource]?.badge?.color }}>
+                <div className="rounded-3 px-3 py-2 d-flex align-items-center gap-2 mt-2" style={{ background: SOURCE_STYLE[selectionScopeSource]?.badge?.background || "#f1f5f9", border: `1.5px solid ${SOURCE_STYLE[selectionScopeSource]?.border || "#dee2e6"}`, fontSize: "0.82rem" }}>
+                  <span style={{ color: SOURCE_STYLE[selectionScopeSource]?.badge?.color, fontSize: "1rem" }}>
                     {selectionScopeSource === "visitor" ? <FaUserTie /> : <FaUserFriends />}
                   </span>
-                  <span>
+                  <span style={{ color: SOURCE_STYLE[selectionScopeSource]?.badge?.color }}>
                     Only <strong>{selectionScopeLabel}</strong> can be selected at once.
                     {selectedKeys.length >= MAX_SELECTION && (
-                      <span className="ms-2 fw-semibold text-danger">Max {MAX_SELECTION} reached.</span>
+                      <span className="ms-2 fw-semibold" style={{ color: "#ef4444" }}>Max {MAX_SELECTION} reached.</span>
                     )}
                   </span>
                 </div>
@@ -548,21 +560,21 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
             </div>
 
             {/* ── List ── */}
-            <div className="flex-grow-1 p-3" style={{ overflowY: "auto" }}>
+            <div className="flex-grow-1 p-3" style={{ overflowY: "auto", background: "#fff" }}>
               {loading && (
-                <div className="text-center py-5 text-muted">
-                  <div className="spinner-border spinner-border-sm me-2" />
-                  Loading history…
+                <div className="text-center py-6 text-muted">
+                  <div className="spinner-border spinner-border-sm me-2" style={{ color: "#b88600" }} />
+                  <span style={{ color: "#b88600", fontWeight: "500" }}>Loading history...</span>
                 </div>
               )}
 
               {!loading && filteredRows.length === 0 && (
-                <div className="text-center py-5">
-                  <div className="mb-3 text-secondary" style={{ fontSize: "2rem" }}><FaSearch /></div>
-                  <h6 className="fw-semibold mb-1">
+                <div className="text-center py-6 rounded-3" style={{ background: "#fff", border: "2px dashed #cbd5e1", padding: "40px 20px" }}>
+                  <div className="mb-3" style={{ fontSize: "2.5rem", color: "#b88600" }}><FaSearch /></div>
+                  <h6 className="fw-bold mb-2" style={{ color: "#1e293b", fontSize: "1.1rem", fontWeight: "700" }}>
                     {searchQuery ? "No matches found" : "No checkout history yet"}
                   </h6>
-                  <p className="text-muted mb-0 small">
+                  <p className="text-muted mb-0" style={{ color: "#475569", fontSize: "0.95rem", fontWeight: "500" }}>
                     {searchQuery
                       ? "Try a different name, email, or phone number."
                       : "Checked-out visitors and guests will appear here for quick repeat registration."}
@@ -571,7 +583,7 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
               )}
 
               {!loading && filteredRows.length > 0 && (
-                <div className="d-flex flex-column gap-2">
+                <div className="d-flex flex-column gap-3">
                   {filteredRows.map((row) => {
                     const key = row.personKey || `${row.source}-${row._id}`;
                     const isSelected = Boolean(selectedRows[key]);
@@ -588,13 +600,14 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
                         key={key}
                         className="border rounded-3"
                         style={{
-                          borderLeft: `4px solid ${srcStyle.border} !important`,
-                          boxShadow: isSelected ? `0 0 0 2px ${srcStyle.border}` : undefined,
-                          transition: "box-shadow 0.15s",
+                          borderLeft: `6px solid ${srcStyle.border}`,
+                          boxShadow: isSelected ? `0 0 0 2px ${srcStyle.border}, 0 8px 16px rgba(216, 178, 0, 0.18)` : "0 2px 8px rgba(0,0,0,0.06)",
+                          transition: "all 0.2s",
                           background: isSelected ? srcStyle.badge.background : "#fff",
-                          borderLeftColor: srcStyle.border,
-                          borderLeftWidth: 4,
+                          cursor: selectMultipleMode ? "pointer" : "default",
                         }}
+                        onMouseEnter={(e) => { if (!selectMultipleMode) e.currentTarget.style.boxShadow = "0 4px 12px rgba(216, 178, 0, 0.16)"; }}
+                        onMouseLeave={(e) => { if (!selectMultipleMode) e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.06)"; }}
                       >
                         <div className="p-3">
                           <div className="d-flex align-items-start gap-3">
@@ -607,7 +620,7 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
                                   style={{ width: "1.1rem", height: "1.1rem", cursor: atMax ? "not-allowed" : "pointer" }}
                                   checked={isSelected}
                                   disabled={atMax}
-                                  onChange={() => toggleSelection(key)}
+                                  onChange={() => toggleSelection(row)}
                                 />
                               </div>
                             )}
@@ -617,15 +630,14 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
                               {/* Name + badges row */}
                               <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-1">
                                 <div className="d-flex align-items-center gap-2 flex-wrap">
-                                  <h6 className="mb-0 fw-semibold" style={{ fontSize: "0.97rem" }}>
+                                  <h6 className="mb-0 fw-bold" style={{ fontSize: "1.15rem", color: "#1e293b", fontWeight: "700" }}>
                                     {row.fullName || "Unnamed"}
                                   </h6>
-                                  <span className="badge rounded-pill" style={srcStyle.badge}>
+                                  <span className="badge rounded-pill" style={{ ...srcStyle.badge, fontSize: "0.85rem", padding: "6px 12px", boxShadow: `0 2px 6px ${srcStyle.border}30`, fontWeight: "600" }}>
                                     {row.source === "visitor" ? <FaUserTie size={10} className="me-1" /> : <FaUserFriends size={10} className="me-1" />}
                                     {row.sourceLabel}
                                   </span>
-                                  <span className="badge rounded-pill bg-success-subtle text-success-emphasis border"
-                                    title="Total visits recorded">
+                                  <span className="badge rounded-pill" style={{ background: "#D8B200", color: "#1f2937", fontSize: "0.85rem", padding: "6px 12px", boxShadow: "0 2px 6px rgba(216, 178, 0, 0.28)", fontWeight: "600" }}>
                                     {row.visitCount} {row.visitCount === 1 ? "visit" : "visits"}
                                   </span>
                                 </div>
@@ -644,7 +656,14 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
                                         minWidth: "130px",
                                         height: CONTROL_HEIGHT,
                                         padding: CONTROL_PADDING,
+                                        borderRadius: "8px",
+                                        fontWeight: "500",
+                                        cursor: "pointer",
+                                        boxShadow: `0 4px 12px ${srcStyle.border}40`,
+                                        transition: "all 0.2s",
                                       }}
+                                      onMouseEnter={(e) => { e.currentTarget.style.boxShadow = `0 6px 16px ${srcStyle.border}60`; e.currentTarget.style.transform = "translateY(-2px)"; }}
+                                      onMouseLeave={(e) => { e.currentTarget.style.boxShadow = `0 4px 12px ${srcStyle.border}40`; e.currentTarget.style.transform = "translateY(0)"; }}
                                       onClick={() => openRepeatForm(row)}
                                       title="Open pre-filled form for this person"
                                     >
@@ -653,32 +672,41 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
                                   )}
                                   <button
                                     type="button"
-                                    className="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1"
+                                    className="btn btn-sm d-inline-flex align-items-center gap-1"
                                     style={{
                                       fontSize: CONTROL_FONT,
                                       minWidth: "130px",
                                       height: CONTROL_HEIGHT,
                                       padding: CONTROL_PADDING,
+                                      background: "#fff8dc",
+                                      color: "#6b5600",
+                                      border: "1.5px solid #efdca0",
+                                      borderRadius: "8px",
+                                      fontWeight: "500",
+                                      cursor: "pointer",
+                                      transition: "all 0.2s",
                                     }}
+                                    onMouseEnter={(e) => { e.currentTarget.style.background = "#fff2e0"; e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(216, 178, 0, 0.2)"; }}
+                                    onMouseLeave={(e) => { e.currentTarget.style.background = "#fff8dc"; e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "none"; }}
                                     onClick={() => exportVisitsForPerson(row)}
                                     title="Export all visit details for this person"
                                   >
-                                    <FaFileExcel size={11} /> Export Details
+                                    <FaFileExcel size={11} /> Export
                                   </button>
                                 </div>
                               </div>
 
                               {/* Core info */}
-                              <div className="d-flex flex-wrap gap-3" style={{ fontSize: "0.85rem", color: "#374151" }}>
+                              <div className="d-flex flex-wrap gap-3" style={{ fontSize: "0.95rem", color: "#475569", marginTop: "10px", lineHeight: "1.55", fontWeight: "500" }}>
                                 {row.email && (
-                                  <span>✉ {row.email}</span>
+                                  <span><strong>Email:</strong> {row.email}</span>
                                 )}
                                 {row.phone && (
-                                  <span>📞 {row.phone}</span>
+                                  <span><strong>Phone:</strong> {row.phone}</span>
                                 )}
                                 {row.latestCheckoutAt && (
                                   <span className="text-muted">
-                                    Last visit: {new Date(row.latestCheckoutAt).toLocaleDateString("en-IN", {
+                                    <strong>Last visit:</strong> {new Date(row.latestCheckoutAt).toLocaleDateString("en-IN", {
                                       day: "2-digit", month: "short", year: "numeric"
                                     })}
                                   </span>
@@ -701,37 +729,37 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 12 }}
-                  transition={{ duration: 0.18 }}
-                  className="border-top px-4 pt-2 pb-3 d-flex flex-column gap-2"
-                  style={{ background: "#f8fafc", borderRadius: "0 0 1rem 1rem" }}
+                  transition={{ duration: 0.2 }}
+                  className="px-4 pt-3 pb-2 d-flex flex-column gap-3"
+                  style={{ background: "#f8f9fa", borderTop: "2px solid #dee2e6", borderRadius: "0 0 1rem 1rem" }}
                 >
                   {/* Row 1: tentative inputs — full width, only when >1 selected */}
                   {isBulkTimeRequired && (
                     <div>
                       <div className="d-flex align-items-stretch w-100" style={{
-                        border: `1.5px solid ${isBulkTimeInvalid ? "#f87171" : "#e2e8f0"}`,
-                        borderRadius: "10px",
+                        border: `1.5px solid ${isBulkTimeInvalid ? "#fecaca" : "#dee2e6"}`,
+                        borderRadius: "8px",
                         background: "#fff",
                         overflow: "hidden",
-                        transition: "border-color 0.15s",
+                        transition: "all 0.2s",
                       }}>
                         {/* IN field */}
-                        <div className="d-flex flex-column flex-grow-1 px-3 py-2" style={{ borderRight: "1px solid #e2e8f0" }}>
-                          <label className="mb-0" style={{ fontSize: "0.6rem", fontWeight: 700, color: "#22c55e", textTransform: "uppercase", letterSpacing: "0.06em" }}>Tentative In</label>
+                        <div className="d-flex flex-column flex-grow-1 px-3 py-2" style={{ borderRight: "1px solid #dee2e6" }}>
+                          <label className="mb-0" style={{ fontSize: "0.65rem", fontWeight: 700, color: "#b88600", textTransform: "uppercase", letterSpacing: "0.08em" }}>Tentative In</label>
                           <input
                             type="datetime-local"
                             className="form-control form-control-sm border-0 p-0 w-100"
                             value={bulkTentativeInTime}
                             onChange={(e) => setBulkTentativeInTime(e.target.value)}
                             title="Tentative In"
-                            style={{ height: "28px", fontSize: "0.8rem", boxShadow: "none", background: "transparent" }}
+                            style={{ height: "28px", fontSize: "0.85rem", boxShadow: "none", background: "transparent", fontWeight: "500", color: "#1e293b" }}
                           />
                         </div>
                         {/* Divider arrow */}
-                        <div className="d-flex align-items-center justify-content-center px-2" style={{ color: "#94a3b8", fontSize: "0.85rem", background: "#f8fafc", flexShrink: 0 }}>→</div>
+                        <div className="d-flex align-items-center justify-content-center px-2" style={{ color: "#cbd5e1", fontSize: "0.9rem", background: "#f8fafc", flexShrink: 0, fontWeight: "bold" }}>&rarr;</div>
                         {/* OUT field */}
-                        <div className="d-flex flex-column flex-grow-1 px-3 py-2" style={{ borderLeft: "1px solid #e2e8f0" }}>
-                          <label className="mb-0" style={{ fontSize: "0.6rem", fontWeight: 700, color: "#f97316", textTransform: "uppercase", letterSpacing: "0.06em" }}>Tentative Out</label>
+                        <div className="d-flex flex-column flex-grow-1 px-3 py-2" style={{ borderLeft: "1px solid #dee2e6" }}>
+                          <label className="mb-0" style={{ fontSize: "0.65rem", fontWeight: 700, color: "#9a5d00", textTransform: "uppercase", letterSpacing: "0.08em" }}>Tentative Out</label>
                           <input
                             type="datetime-local"
                             className="form-control form-control-sm border-0 p-0 w-100"
@@ -739,14 +767,14 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
                             value={bulkTentativeOutTime}
                             onChange={(e) => setBulkTentativeOutTime(e.target.value)}
                             title="Tentative Out"
-                            style={{ height: "28px", fontSize: "0.8rem", boxShadow: "none", background: "transparent" }}
+                            style={{ height: "28px", fontSize: "0.85rem", boxShadow: "none", background: "transparent", fontWeight: "500", color: "#1e293b" }}
                           />
                         </div>
                       </div>
-                      {/* Inline warning when Out ≤ In */}
+                      {/* Inline warning when Out is not after In */}
                       {isBulkTimeInvalid && (
-                        <div className="d-flex align-items-center gap-1 mt-1" style={{ color: "#ef4444", fontSize: "0.75rem" }}>
-                          <FaExclamationTriangle size={10} />
+                        <div className="d-flex align-items-center gap-2 mt-2 px-2 py-1 rounded" style={{ background: "#fef2f2", color: "#dc2626", fontSize: "0.75rem", fontWeight: "500" }}>
+                          <FaExclamationTriangle size={12} style={{ flexShrink: 0 }} />
                           <span>Out time must be after In time</span>
                         </div>
                       )}
@@ -755,10 +783,10 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
 
                   {/* Row 2: counter left, buttons right — always fits */}
                   <div className="d-flex align-items-center justify-content-between flex-wrap gap-2">
-                    <span className="fw-semibold text-nowrap" style={{ fontSize: "0.88rem" }}>
+                    <span className="fw-semibold text-nowrap" style={{ fontSize: "0.9rem", color: "#334155" }}>
                       {selectedKeys.length} of {MAX_SELECTION} selected
                       {selectedSource && (
-                        <span className="ms-1 text-muted fw-normal">
+                        <span className="ms-2" style={{ color: "#b88600", fontWeight: "600" }}>
                           ({selectedSource === "visitor" ? "Visitors" : "Guests"})
                         </span>
                       )}
@@ -767,7 +795,7 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
                       <button
                         type="button"
                         className="btn btn-sm btn-outline-danger d-inline-flex align-items-center justify-content-center"
-                        style={{ height: CONTROL_HEIGHT, fontSize: CONTROL_FONT, padding: "0 18px", whiteSpace: "nowrap" }}
+                        style={{ height: CONTROL_HEIGHT, fontSize: CONTROL_FONT, padding: "0 18px", whiteSpace: "nowrap", borderRadius: "6px", fontWeight: "500" }}
                         onClick={() => setSelectedRows({})}
                       >
                         Clear
@@ -777,18 +805,20 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
                           type="button"
                           className="btn btn-sm d-inline-flex align-items-center justify-content-center gap-2"
                           style={{
-                            background: SOURCE_STYLE.visitor.border,
-                            color: "#fff",
-                            border: "none",
                             height: CONTROL_HEIGHT,
                             fontSize: CONTROL_FONT,
                             padding: "0 18px",
                             whiteSpace: "nowrap",
+                            borderRadius: "6px",
+                            fontWeight: "500",
+                            background: "#D8B200",
+                            color: "#1f2937",
+                            border: "none",
                           }}
                           onClick={() => repeatSelected("visitor")}
                           disabled={!selectedVisitorRows.length || !isBulkTimeRangeValid}
                         >
-                          <FaRedoAlt size={11} />
+                          <FaRedoAlt size={12} />
                           Repeat {selectedVisitorRows.length} {selectedVisitorRows.length === 1 ? "Visitor" : "Visitors"}
                         </button>
                       )}
@@ -797,18 +827,20 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
                           type="button"
                           className="btn btn-sm d-inline-flex align-items-center justify-content-center gap-2"
                           style={{
-                            background: SOURCE_STYLE.guest.border,
-                            color: "#fff",
-                            border: "none",
                             height: CONTROL_HEIGHT,
                             fontSize: CONTROL_FONT,
                             padding: "0 18px",
                             whiteSpace: "nowrap",
+                            borderRadius: "6px",
+                            fontWeight: "500",
+                            background: "#F08C00",
+                            color: "#fff",
+                            border: "none",
                           }}
                           onClick={() => repeatSelected("guest")}
                           disabled={!selectedGuestRows.length || !isBulkTimeRangeValid}
                         >
-                          <FaRedoAlt size={11} />
+                          <FaRedoAlt size={12} />
                           Repeat {selectedGuestRows.length} {selectedGuestRows.length === 1 ? "Guest" : "Guests"}
                         </button>
                       )}
