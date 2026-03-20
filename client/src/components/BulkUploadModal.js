@@ -2,9 +2,10 @@ import React, { useMemo, useState } from "react";
 import axios from "axios";
 import Swal from "sweetalert2";
 import * as XLSX from "xlsx";
-import { validatePhoneLength } from "../utils/phoneUtils";
+import { validatePhoneLength, PHONE_RULES } from "../utils/phoneUtils";
 
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Stricter email regex to match VisitorForm.js
+const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 
 const VISITOR_HEADERS = [
   "firstName",
@@ -15,7 +16,6 @@ const VISITOR_HEADERS = [
   "phone",
   "purposeOfVisit",
   "host",
-  "onBehalfOf",
   "meetingRoom",
   "laptopSerial",
   "guestWifiRequired",
@@ -37,7 +37,6 @@ const VISITOR_REQUIRED_FIELDS = [
 ];
 
 const VISITOR_OPTIONAL_FIELDS = [
-  "onBehalfOf",
   "meetingRoom",
   "laptopSerial",
   "guestWifiRequired",
@@ -50,7 +49,6 @@ const GUEST_HEADERS = [
   "email",
   "company",
   "host",
-  "onBehalfOf",
   "countryCode",
   "phone",
   "purposeOfVisit",
@@ -79,7 +77,6 @@ const GUEST_REQUIRED_FIELDS = [
 const GUEST_OPTIONAL_FIELDS = [
   "lastName",
   "email",
-  "onBehalfOf",
   "meetingRoomRequired",
   "meetingRoom",
   "laptopSerial",
@@ -93,11 +90,10 @@ const VISITOR_SAMPLE_ROW = {
   lastName: "Visitor",
   email: "sample.visitor@example.com",
   company: "UD Trucks",
-  countryCode: "+91",
+  countryCode: "91", // You can enter '91' or '+91', system will auto-correct
   phone: "9876543210",
   purposeOfVisit: "Plant tour",
   host: "Host Name",
-  onBehalfOf: "false",
   meetingRoom: "Meeting Room A",
   laptopSerial: "LPT-12345",
   guestWifiRequired: "true",
@@ -112,8 +108,7 @@ const GUEST_SAMPLE_ROW = {
   email: "sample.guest@example.com",
   company: "UD Trucks",
   host: "Host Name",
-  onBehalfOf: "false",
-  countryCode: "+91",
+  countryCode: "91", // You can enter '91' or '+91', system will auto-correct
   phone: "9876543210",
   purposeOfVisit: "Vendor meeting",
   meetingRoomRequired: "true",
@@ -256,53 +251,23 @@ const extractRows = (sheet) => {
 };
 
 const validateTemplateHeaders = (actualHeaders, expectedHeaders) => {
-  const normalizedActual = (actualHeaders || [])
-    .map((h) => normalizeHeader(h))
-    .filter(Boolean);
-  const normalizedExpected = (expectedHeaders || [])
-    .map((h) => normalizeHeader(h))
-    .filter(Boolean);
-
-  if (!normalizedActual.length) {
+  // Enforce strict header order and column count
+  if (!actualHeaders || !expectedHeaders) {
     return ["Header row is missing. Please use the downloaded template."];
   }
-
-  const seen = new Set();
-  const duplicateHeaders = [];
-  normalizedActual.forEach((h) => {
-    if (seen.has(h)) duplicateHeaders.push(h);
-    seen.add(h);
-  });
-  if (duplicateHeaders.length > 0) {
+  if (actualHeaders.length !== expectedHeaders.length) {
     return [
-      `Duplicate header(s) found: ${duplicateHeaders.join(", ")}. Please keep each column only once.`,
+      `Column count mismatch: expected ${expectedHeaders.length}, got ${actualHeaders.length}. Please use the template as-is.`
     ];
   }
-
-  const actualSet = new Set(normalizedActual);
-  const expectedSet = new Set(normalizedExpected);
-  const missing = normalizedExpected.filter((h) => !actualSet.has(h));
-  const extra = normalizedActual.filter((h) => !expectedSet.has(h));
-
-  const errors = [];
-  if (missing.length > 0) {
-    errors.push(`Missing required column(s): ${missing.join(", ")}.`);
-  }
-  if (extra.length > 0) {
-    errors.push(`Unexpected column(s): ${extra.join(", ")}.`);
-  }
-
-  if (errors.length === 0) {
-    const hasOrderMismatch =
-      normalizedActual.length !== normalizedExpected.length ||
-      normalizedExpected.some((h, idx) => normalizedActual[idx] !== h);
-
-    if (hasOrderMismatch) {
-      errors.push("Column order does not match the template. Please use the template as-is.");
+  for (let i = 0; i < expectedHeaders.length; i++) {
+    if (normalizeHeader(actualHeaders[i]) !== normalizeHeader(expectedHeaders[i])) {
+      return [
+        `Column order mismatch at position ${i + 1}: expected '${expectedHeaders[i]}', got '${actualHeaders[i]}'. Please use the template as-is.`
+      ];
     }
   }
-
-  return errors;
+  return [];
 };
 
 const normalizeRowKeys = (row) => {
@@ -337,6 +302,7 @@ const buildInstructionRows = (requiredFields, optionalFields, extraRows = []) =>
   return rows;
 };
 
+const ALLOWED_COUNTRY_CODES = Object.keys(PHONE_RULES);
 const validateVisitorRows = (records, defaultHostName, submittedBy) => {
   const errors = [];
   const payload = [];
@@ -350,17 +316,29 @@ const validateVisitorRows = (records, defaultHostName, submittedBy) => {
   }
 
   records.forEach(({ lineNumber, row }) => {
+    let rowHasError = false;
     const firstName = toText(row.firstname);
     const lastName = toText(row.lastname);
     const email = toText(row.email).toLowerCase();
     const company = toText(row.company);
-    const countryCode = toText(row.countrycode) || "+91";
+    let countryCode = toText(row.countrycode) || "+91";
+    // Auto-correct: add '+' if missing
+    if (countryCode && !countryCode.startsWith("+") && ALLOWED_COUNTRY_CODES.includes("+" + countryCode)) {
+      countryCode = "+" + countryCode;
+    }
+    // Restrict country code to allowed values
+    let unknownCountryCode = false;
+    if (!ALLOWED_COUNTRY_CODES.includes(countryCode)) {
+      errors.push(`Row ${lineNumber}: countryCode '${countryCode}' is not allowed. Allowed codes: ${ALLOWED_COUNTRY_CODES.join(", ")}`);
+      rowHasError = true;
+      unknownCountryCode = true;
+    }
     const phone = splitPhoneByCountryCode(row.phone, countryCode);
     const purposeOfVisit = toText(row.purposeofvisit);
-    const rowHost = toText(row.host);
-    const onBehalfOfParsed = parseBooleanStrict(row.onbehalfof);
-    const onBehalfOf = onBehalfOfParsed.value;
-    const host = onBehalfOf ? rowHost : loggedInHost;
+    let rowHost = toText(row.host);
+    // Default host to Azure auth if empty
+    if (!rowHost) rowHost = loggedInHost;
+    const host = rowHost;
     const meetingRoom = toText(row.meetingroom);
     const laptopSerial = toText(row.laptopserial);
     const guestWifiParsed = parseBooleanStrict(row.guestwifirequired);
@@ -368,73 +346,50 @@ const validateVisitorRows = (records, defaultHostName, submittedBy) => {
     const inTime = parseExcelDate(row.tentativeintime ?? row.intime);
     const outTime = parseExcelDate(row.tentativeouttime ?? row.outtime);
 
-    if (!firstName) errors.push(`Row ${lineNumber}: firstName is required.`);
-    if (!lastName) errors.push(`Row ${lineNumber}: lastName is required.`);
-    if (!email) errors.push(`Row ${lineNumber}: email is required.`);
-    if (email && !EMAIL_REGEX.test(email)) errors.push(`Row ${lineNumber}: email format is invalid.`);
-    if (!company) errors.push(`Row ${lineNumber}: company is required.`);
-    if (!purposeOfVisit) errors.push(`Row ${lineNumber}: purposeOfVisit is required.`);
-    if (!rowHost) errors.push(`Row ${lineNumber}: host is required.`);
-    if (!phone) errors.push(`Row ${lineNumber}: phone is required.`);
-    if (!onBehalfOfParsed.valid) {
-      errors.push(`Row ${lineNumber}: onBehalfOf ${onBehalfOfParsed.message}.`);
-    }
-    if (
-      !onBehalfOf &&
-      rowHost &&
-      rowHost.toLowerCase() !== loggedInHost.toLowerCase()
-    ) {
-      errors.push(
-        `Row ${lineNumber}: host must match logged-in host (${loggedInHost}) unless onBehalfOf is true.`
-      );
-    }
-    if (!guestWifiParsed.valid) {
-      errors.push(`Row ${lineNumber}: guestWifiRequired ${guestWifiParsed.message}.`);
-    }
-
+    if (!firstName) { errors.push(`Row ${lineNumber}: firstName is required.`); rowHasError = true; }
+    if (!lastName) { errors.push(`Row ${lineNumber}: lastName is required.`); rowHasError = true; }
+    if (!email) { errors.push(`Row ${lineNumber}: email is required.`); rowHasError = true; }
+    if (email && !EMAIL_REGEX.test(email)) { errors.push(`Row ${lineNumber}: email format is invalid.`); rowHasError = true; }
+    if (!company) { errors.push(`Row ${lineNumber}: company is required.`); rowHasError = true; }
+    if (!purposeOfVisit) { errors.push(`Row ${lineNumber}: purposeOfVisit is required.`); rowHasError = true; }
+    if (!rowHost) { errors.push(`Row ${lineNumber}: host is required.`); rowHasError = true; }
+    if (!phone) { errors.push(`Row ${lineNumber}: phone is required.`); rowHasError = true; }
+    if (!guestWifiParsed.valid) { errors.push(`Row ${lineNumber}: guestWifiRequired ${guestWifiParsed.message}.`); rowHasError = true; }
     const phoneCheck = validatePhoneLength(countryCode, phone);
-    if (!phoneCheck.valid) errors.push(`Row ${lineNumber}: ${phoneCheck.message}.`);
-
-    if (!inTime) {
-      errors.push(`Row ${lineNumber}: TentativeinTime is required and must be a valid date/time.`);
-    } else if (inTime < now) {
-      errors.push(`Row ${lineNumber}: TentativeinTime cannot be in the past.`);
+    if (unknownCountryCode) {
+      errors.push(`Row ${lineNumber}: phone length cannot be validated for unknown country code '${countryCode}'.`);
+      rowHasError = true;
+    } else if (!phoneCheck.valid) {
+      errors.push(`Row ${lineNumber}: ${phoneCheck.message} (countryCode: ${countryCode}).`);
+      rowHasError = true;
     }
-
-    if (!outTime) {
-      errors.push(`Row ${lineNumber}: TentativeoutTime is required and must be a valid date/time.`);
-    } else if (inTime && outTime <= inTime) {
-      errors.push(`Row ${lineNumber}: TentativeoutTime must be after TentativeinTime.`);
-    }
-
+    if (!inTime) { errors.push(`Row ${lineNumber}: TentativeinTime is required and must be a valid date/time.`); rowHasError = true; }
+    else if (inTime < now) { errors.push(`Row ${lineNumber}: TentativeinTime cannot be in the past.`); rowHasError = true; }
+    if (!outTime) { errors.push(`Row ${lineNumber}: TentativeoutTime is required and must be a valid date/time.`); rowHasError = true; }
+    else if (inTime && outTime <= inTime) { errors.push(`Row ${lineNumber}: TentativeoutTime must be after TentativeinTime.`); rowHasError = true; }
     const duplicateKey = `${firstName.toLowerCase()}_${lastName.toLowerCase()}_${phone}`;
-    if (seen[duplicateKey]) {
-      errors.push(
-        `Row ${lineNumber}: duplicate person and phone found (same as row ${seen[duplicateKey]}).`
-      );
-    } else {
-      seen[duplicateKey] = lineNumber;
+    if (seen[duplicateKey]) { errors.push(`Row ${lineNumber}: duplicate person and phone found (same as row ${seen[duplicateKey]}).`); rowHasError = true; }
+    else { seen[duplicateKey] = lineNumber; }
+    if (!rowHasError) {
+      payload.push({
+        category: "Visitor",
+        host,
+        firstName,
+        lastName,
+        email,
+        company,
+        countryCode,
+        phone: `${countryCode}${phone}`,
+        purposeOfVisit,
+        meetingRoom,
+        laptopSerial,
+        guestWifiRequired,
+        inTime,
+        outTime,
+        submittedBy,
+        status: "new",
+      });
     }
-
-    payload.push({
-      category: "Visitor",
-      host,
-      onBehalfOf,
-      firstName,
-      lastName,
-      email,
-      company,
-      countryCode,
-      phone: `${countryCode}${phone}`,
-      purposeOfVisit,
-      meetingRoom,
-      laptopSerial,
-      guestWifiRequired,
-      inTime,
-      outTime,
-      submittedBy,
-      status: "new",
-    });
   });
 
   return { errors, payload };
@@ -458,10 +413,9 @@ const validateGuestRows = (records, defaultHostName, submittedBy) => {
     const lastName = toText(row.lastname);
     const email = toText(row.email).toLowerCase();
     const company = toText(row.company);
-    const rowHost = toText(row.host);
-    const onBehalfOfParsed = parseBooleanStrict(row.onbehalfof);
-    const onBehalfOf = onBehalfOfParsed.value;
-    const host = onBehalfOf ? rowHost : loggedInHost;
+    let rowHost = toText(row.host);
+    if (!rowHost) rowHost = loggedInHost;
+    const host = rowHost;
     const countryCode = toText(row.countrycode) || "+91";
     const phone = splitPhoneByCountryCode(row.phone, countryCode);
     const purposeOfVisit = toText(row.purposeofvisit);
@@ -486,18 +440,6 @@ const validateGuestRows = (records, defaultHostName, submittedBy) => {
     if (!rowHost) errors.push(`Row ${lineNumber}: host is required.`);
     if (!purposeOfVisit) errors.push(`Row ${lineNumber}: purposeOfVisit is required.`);
     if (!phone) errors.push(`Row ${lineNumber}: phone is required.`);
-    if (!onBehalfOfParsed.valid) {
-      errors.push(`Row ${lineNumber}: onBehalfOf ${onBehalfOfParsed.message}.`);
-    }
-    if (
-      !onBehalfOf &&
-      rowHost &&
-      rowHost.toLowerCase() !== loggedInHost.toLowerCase()
-    ) {
-      errors.push(
-        `Row ${lineNumber}: host must match logged-in host (${loggedInHost}) unless onBehalfOf is true.`
-      );
-    }
     if (!meetingRoomRequiredParsed.valid) {
       errors.push(`Row ${lineNumber}: meetingRoomRequired ${meetingRoomRequiredParsed.message}.`);
     }
@@ -529,6 +471,10 @@ const validateGuestRows = (records, defaultHostName, submittedBy) => {
 
     if (meetingRoomRequired && !meetingRoom) {
       errors.push(`Row ${lineNumber}: meetingRoom is required when meetingRoomRequired is true.`);
+    }
+    // If meetingRoom is filled but meetingRoomRequired is not true, throw error
+    if (!meetingRoomRequired && meetingRoom) {
+      errors.push(`Row ${lineNumber}: meetingRoom should only be filled if meetingRoomRequired is true.`);
     }
 
     if (refreshmentRequired && !proposedRefreshmentTime) {
@@ -565,7 +511,6 @@ const validateGuestRows = (records, defaultHostName, submittedBy) => {
       email,
       company,
       host,
-      onBehalfOf,
       countryCode,
       phone: `${countryCode}${phone}`,
       purposeOfVisit,
@@ -615,14 +560,12 @@ export default function BulkUploadModal({
         ? buildInstructionRows(VISITOR_REQUIRED_FIELDS, VISITOR_OPTIONAL_FIELDS, [
             "Use readable date/time format, for example: 2026-04-10 10:00.",
             "host is required and should match the logged-in host name.",
-            "Use onBehalfOf = true only when entering a different host name.",
           ])
         : buildInstructionRows(GUEST_REQUIRED_FIELDS, GUEST_OPTIONAL_FIELDS, [
             "category must be Isuzu Employee or UD Employee.",
             "meetingRoom is required only when meetingRoomRequired is true.",
             "proposedRefreshmentTime is required only when refreshmentRequired is true.",
             "host is required and should match the logged-in host name.",
-            "Use onBehalfOf = true only when entering a different host name.",
           ]),
       fileName: isVisitor ? "visitor_bulk_upload_template.xlsx" : "guest_bulk_upload_template.xlsx",
     };
