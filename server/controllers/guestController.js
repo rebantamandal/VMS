@@ -1,6 +1,7 @@
 import { getDeleteDateAfterOneYear } from "../utils/dateUtils.js";
 import Guest from "../models/Guest.js";
 import { sendGuestWifiEmail, sendMeetingRoomEmail, sendRefreshmentEmail } from "../email/emailservice.js";
+import { addPassEventAtomic, ensureInitialPassIssued } from "../utils/passTracking.js";
 
 // CREATE MULTIPLE GUESTS
 export const createGuests = async (req, res) => {
@@ -53,7 +54,11 @@ export const getGuestById = async (req, res) => {
 // UPDATE GUEST
 export const updateGuest = async (req, res) => {
   try {
+    const guest = await Guest.findById(req.params.id);
+    if (!guest) return res.status(404).json({ error: "Guest not found" });
+
     const updateData = { ...req.body };
+    const wasCheckedIn = guest.status === "checkedIn";
 
     if (updateData.status === "checkedIn" && !updateData.actualInTime) {
       updateData.actualInTime = new Date();
@@ -69,16 +74,39 @@ export const updateGuest = async (req, res) => {
       updateData.actualOutTime = new Date();
     }
 
-    const guest = await Guest.findByIdAndUpdate(req.params.id, updateData, {
-      new: true,
-      runValidators: true,
-    });
+    Object.assign(guest, updateData);
 
-    if (!guest) return res.status(404).json({ error: "Guest not found" });
+    if (!wasCheckedIn && guest.status === "checkedIn") {
+      ensureInitialPassIssued(guest);
+    }
+
+    await guest.save();
 
     res.json({ message: "Guest updated successfully", guest });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+};
+
+export const addGuestPassEvent = async (req, res) => {
+  try {
+    const result = await addPassEventAtomic({
+      Model: Guest,
+      recordId: req.params.id,
+      action: req.body?.action,
+      recordedBy: req.body?.recordedBy || "Security",
+    });
+
+    res.json({
+      message: result.message,
+      alreadyRecorded: result.alreadyRecorded,
+      guest: result.record,
+    });
+  } catch (err) {
+    if (err.code === "NOT_FOUND") {
+      return res.status(404).json({ error: "Guest not found" });
+    }
+    res.status(400).json({ error: err.message });
   }
 };
 

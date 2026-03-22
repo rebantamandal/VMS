@@ -1,5 +1,7 @@
 import express from "express";
 import Visitor from "../models/Visitor.js";
+import { addPassEventAtomic, ensureInitialPassIssued } from "../utils/passTracking.js";
+import { resolveOfficialHostEmail, sendCheckoutEmailToHost } from "../email/emailservice.js";
 
 const router = express.Router();
 
@@ -32,13 +34,62 @@ router.get("/", async (req, res) => {
 ========================= */
 router.put("/:id", async (req, res) => {
   try {
-    const updated = await Visitor.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true }
-    );
-    res.json(updated);
+    const visitor = await Visitor.findById(req.params.id);
+    if (!visitor) {
+      return res.status(404).json({ error: "Visitor not found" });
+    }
+
+    const wasCheckedIn = visitor.status === "checkedIn";
+    const wasCheckedOut = visitor.status === "checkedOut";
+    Object.assign(visitor, req.body);
+
+    if (visitor.status === "checkedIn" && !visitor.actualInTime) {
+      visitor.actualInTime = new Date();
+    }
+
+    if (visitor.status === "checkedOut" && !visitor.actualOutTime) {
+      visitor.actualOutTime = new Date();
+    }
+
+    if (!wasCheckedIn && visitor.status === "checkedIn") {
+      ensureInitialPassIssued(visitor);
+    }
+
+    await visitor.save();
+
+    if (!wasCheckedOut && visitor.status === "checkedOut") {
+      const toHostEmail = resolveOfficialHostEmail(visitor);
+      await sendCheckoutEmailToHost({
+        type: "visitor",
+        visitor,
+        toHostEmail,
+      });
+    }
+
+    res.json(visitor);
   } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+router.post("/:id/pass-events", async (req, res) => {
+  try {
+    const result = await addPassEventAtomic({
+      Model: Visitor,
+      recordId: req.params.id,
+      action: req.body?.action,
+      recordedBy: req.body?.recordedBy || "Security",
+    });
+
+    return res.status(200).json({
+      message: result.message,
+      alreadyRecorded: result.alreadyRecorded,
+      visitor: result.record,
+    });
+  } catch (error) {
+    if (error.code === "NOT_FOUND") {
+      return res.status(404).json({ error: "Visitor not found" });
+    }
     res.status(400).json({ error: error.message });
   }
 });

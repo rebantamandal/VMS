@@ -4,6 +4,7 @@ import {
   getGuests,
   getGuestById,
   updateGuest,
+  addGuestPassEvent,
   deleteGuest,
   removeGuestFromUI,
 } from "../controllers/guestController.js"; // make sure controller is also ESM
@@ -21,6 +22,8 @@ router.get("/:id", getGuestById);
 
 // UPDATE GUEST
 router.put("/:id", updateGuest);
+
+router.post("/:id/pass-events", addGuestPassEvent);
 
 // DELETE GUEST
 router.delete("/:id", deleteGuest);

@@ -1,5 +1,35 @@
 import mongoose from "mongoose";
 
+const dailyPassEventSchema = new mongoose.Schema(
+  {
+    action: {
+      type: String,
+      enum: ["issued", "returned"],
+      required: true,
+    },
+    dateKey: {
+      type: String,
+      required: true,
+    },
+    recordedAt: {
+      type: Date,
+      required: true,
+      default: Date.now,
+    },
+    recordedBy: {
+      type: String,
+      default: "Security",
+      trim: true,
+    },
+    badgeNoAtEvent: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+  },
+  { _id: false }
+);
+
 const guestSchema = new mongoose.Schema(
   {
     category: {
@@ -60,6 +90,16 @@ const guestSchema = new mongoose.Schema(
     hostApproved: { type: Boolean, default: false },
 
     submittedBy: { type: String },
+
+    dailyPassEvents: {
+      type: [dailyPassEventSchema],
+      default: [],
+    },
+
+    dailyPassAlertDates: {
+      type: [String],
+      default: [],
+    },
 
     status: {
       type: String,

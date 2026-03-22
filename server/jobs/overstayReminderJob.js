@@ -1,6 +1,24 @@
 import Visitor from "../models/Visitor.js";
+import Guest from "../models/Guest.js";
 import AdhocVisitor from "../models/Adhoc.js";
-import { sendOverstayEmailToHost } from "../email/emailservice.js";
+import { sendDailyPassReturnAlertEmail, sendOverstayEmailToHost } from "../email/emailservice.js";
+import {
+  formatPassTimestamp,
+  getDailyPassEvents,
+  getPassDateKey,
+  hasIssuedWithoutReturnForDate,
+  hasPassReturnAlertForDate,
+  isPassTrackingDay,
+  markPassReturnAlertSent,
+} from "../utils/passTracking.js";
+
+const PASS_RETURN_ALERT_HOUR_IST = Number(process.env.PASS_RETURN_ALERT_HOUR_IST || 20);
+
+const hourFormatter = new Intl.DateTimeFormat("en-IN", {
+  timeZone: "Asia/Kolkata",
+  hour: "2-digit",
+  hour12: false,
+});
 
 // Helper: is overdue by 15 mins
 function isOverdue15(outTime) {
@@ -17,11 +35,50 @@ function resolveHostEmail(v) {
   return v.hostEmail || v.submittedBy || null;
 }
 
+function getIstHour(date = new Date()) {
+  const hourText = hourFormatter.format(date);
+  const hour = Number.parseInt(hourText, 10);
+  return Number.isNaN(hour) ? 0 : hour;
+}
+
+async function runDailyPassReturnAlerts(records, type, now) {
+  const todayKey = getPassDateKey(now);
+  if (!todayKey || getIstHour(now) < PASS_RETURN_ALERT_HOUR_IST) {
+    return;
+  }
+
+  for (const record of records) {
+    if (!isPassTrackingDay(record, now)) continue;
+    if (!hasIssuedWithoutReturnForDate(record, todayKey)) continue;
+    if (hasPassReturnAlertForDate(record, todayKey)) continue;
+
+    const todayIssue = getDailyPassEvents(record).find(
+      (event) => event?.action === "issued" && event?.dateKey === todayKey
+    );
+
+    await sendDailyPassReturnAlertEmail({
+      type,
+      visitor: record,
+      toHostEmail: resolveHostEmail(record),
+      issuedAt: formatPassTimestamp(todayIssue?.recordedAt),
+      dateKey: todayKey,
+    });
+
+    markPassReturnAlertSent(record, todayKey);
+    await record.save();
+  }
+}
+
 export async function runOverstayReminderJob() {
   try {
     // Only check people who are currently inside
-    const [visitors, adhocs] = await Promise.all([
+    const [visitors, guests, adhocs] = await Promise.all([
       Visitor.find({
+        uiRemoved: { $ne: true },
+        status: "checkedIn",
+        outTime: { $ne: null },
+      }),
+      Guest.find({
         uiRemoved: { $ne: true },
         status: "checkedIn",
         outTime: { $ne: null },
@@ -32,6 +89,11 @@ export async function runOverstayReminderJob() {
         outTime: { $ne: null },
       }),
     ]);
+
+    const now = new Date();
+
+    await runDailyPassReturnAlerts(visitors, "visitor", now);
+    await runDailyPassReturnAlerts(guests, "guest", now);
 
     // VISITORS
     for (const v of visitors) {
@@ -86,7 +148,7 @@ export async function runOverstayReminderJob() {
     }
 
     console.log(
-      `✅ Overstay reminder job complete. Checked Visitors=${visitors.length}, Adhoc=${adhocs.length}`
+      `✅ Overstay reminder job complete. Checked Visitors=${visitors.length}, Guests=${guests.length}, Adhoc=${adhocs.length}`
     );
   } catch (err) {
     console.error("❌ Overstay reminder job failed:", err.message);

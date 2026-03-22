@@ -45,6 +45,28 @@ async function sendEmail(message) {
   }
 }
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const normalizeEmail = (value) => {
+  const email = String(value || "").trim().toLowerCase();
+  return EMAIL_REGEX.test(email) ? email : "";
+};
+
+export const resolveOfficialHostEmail = (visitor) => {
+  const candidates = [
+    visitor?.hostEmail,
+    visitor?.submittedBy,
+    visitor?.host,
+  ];
+
+  for (const candidate of candidates) {
+    const email = normalizeEmail(candidate);
+    if (email) return email;
+  }
+
+  return "";
+};
+
 /* ====================== WIFI EMAIL ====================== */
 export async function sendGuestWifiEmail(visitor) {
   const name = `${visitor.firstName || ""} ${visitor.lastName || ""}`.trim() || "Visitor";
@@ -315,6 +337,122 @@ export async function sendOverstayEmailToHost({ type, visitor, toHostEmail }) {
         <p>Regards,<br/>UD Trucks India – VMS</p>
       `,
       plainText: `${subject} | Tentative out: ${outTime} | Now: ${now}`,
+    },
+  };
+
+  await sendEmail(message);
+}
+
+export async function sendDailyPassReturnAlertEmail({ type, visitor, toHostEmail, issuedAt, dateKey }) {
+  if (!toHostEmail) {
+    console.warn("⚠️ No host email provided; cannot send daily pass return alert.");
+    return;
+  }
+
+  const name = `${visitor.firstName || ""} ${visitor.lastName || ""}`.trim() || "Visitor";
+  const hostName = visitor.host || "Host";
+  const finalCheckout = visitor.outTime ? new Date(visitor.outTime).toLocaleString("en-IN") : "N/A";
+  const badgeNo = visitor.cardNo || "Not assigned";
+  const issueTime = issuedAt || "Recorded earlier today";
+
+  const subject = `Pass Return Alert: ${name} has not returned today's pass`;
+
+  const message = {
+    senderAddress: process.env.ACS_SENDER_EMAIL,
+    recipients: {
+      to: [
+        {
+          address: toHostEmail,
+          displayName: hostName,
+        },
+      ],
+      cc: [
+        {
+          address: "group.id.a383968@udtrucks.com",
+          displayName: "Security Team",
+        },
+      ],
+    },
+    content: {
+      subject,
+      html: `
+        <p>Hello <strong>${hostName}</strong>,</p>
+
+        <p>This is an automated reminder from <strong>Facilo</strong>.</p>
+
+        <p>
+          The ${type} <strong>${name}</strong> was issued a pass on <strong>${dateKey}</strong>, but Security has not yet recorded the pass return for today.
+        </p>
+
+        <p><b>Details:</b></p>
+        <ul>
+          <li><b>Name:</b> ${name}</li>
+          <li><b>Badge Number:</b> ${badgeNo}</li>
+          <li><b>Issued Today At:</b> ${issueTime}</li>
+          <li><b>Final Tentative Check-out:</b> ${finalCheckout}</li>
+        </ul>
+
+        <p>Please coordinate with Security if the pass has already been returned or if the visit needs to continue tomorrow.</p>
+
+        <p>Regards,<br/>UD Trucks India – VMS</p>
+      `,
+      plainText: `${subject} | Badge: ${badgeNo} | Issued: ${issueTime} | Final checkout: ${finalCheckout}`,
+    },
+  };
+
+  await sendEmail(message);
+}
+
+export async function sendCheckoutEmailToHost({ type = "visitor", visitor, toHostEmail }) {
+  if (!toHostEmail) {
+    console.warn("⚠️ No host official email provided; cannot send checkout notification.");
+    return;
+  }
+
+  const name = `${visitor.firstName || ""} ${visitor.lastName || ""}`.trim() || "Visitor";
+  const hostName = visitor.host || "Host";
+  const checkoutTime = visitor.actualOutTime
+    ? new Date(visitor.actualOutTime).toLocaleString("en-IN")
+    : new Date().toLocaleString("en-IN");
+  const inTime = visitor.inTime ? new Date(visitor.inTime).toLocaleString("en-IN") : "N/A";
+  const outTime = visitor.outTime ? new Date(visitor.outTime).toLocaleString("en-IN") : "N/A";
+
+  const subject = `${type === "visitor" ? "Visitor" : "Guest"} Checked Out: ${name}`;
+
+  const message = {
+    senderAddress: process.env.ACS_SENDER_EMAIL,
+    recipients: {
+      to: [
+        {
+          address: toHostEmail,
+          displayName: hostName,
+        },
+      ],
+    },
+    content: {
+      subject,
+      html: `
+        <p>Hello <strong>${hostName}</strong>,</p>
+
+        <p>This is an automated notification from <strong>Facilo</strong>.</p>
+
+        <p>
+          The ${type} <strong>${name}</strong> has been successfully checked out.
+        </p>
+
+        <p><b>Details:</b></p>
+        <ul>
+          <li><b>Name:</b> ${name}</li>
+          <li><b>Category:</b> ${visitor.category || "-"}</li>
+          <li><b>Company:</b> ${visitor.company || "-"}</li>
+          <li><b>Tentative In:</b> ${inTime}</li>
+          <li><b>Tentative Out:</b> ${outTime}</li>
+          <li><b>Actual Check-out:</b> ${checkoutTime}</li>
+        </ul>
+
+        <p>Regards,<br/>UD Trucks India – VMS</p>
+      `,
+      plainText: `${subject} | Actual check-out: ${checkoutTime}`,
     },
   };
 

@@ -84,6 +84,179 @@ const formatIST = (dateValue) => {
   });
 };
 
+const PASS_TRACKING_TIME_ZONE = "Asia/Kolkata";
+
+const passDateKeyFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: PASS_TRACKING_TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+const getPassDateKey = (value) => {
+  if (!value) return "";
+
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const parts = passDateKeyFormatter.formatToParts(date);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+
+  if (!year || !month || !day) return "";
+  return `${year}-${month}-${day}`;
+};
+
+const getDailyPassEvents = (visitor) => (
+  Array.isArray(visitor?.dailyPassEvents) ? visitor.dailyPassEvents : []
+);
+
+const formatDateKeyForIST = (dateKey) => {
+  if (!dateKey) return "";
+
+  const [yearText, monthText, dayText] = String(dateKey).split("-");
+  const year = Number.parseInt(yearText, 10);
+  const month = Number.parseInt(monthText, 10);
+  const day = Number.parseInt(dayText, 10);
+
+  if (!year || !month || !day) return dateKey;
+
+  const stableDate = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+  return stableDate.toLocaleDateString("en-IN", {
+    timeZone: PASS_TRACKING_TIME_ZONE,
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+};
+
+const isLongPeriodVisit = (visitor) => {
+  const startDateKey = getPassDateKey(visitor?.actualInTime || visitor?.inTime);
+  const finalOutDateKey = getPassDateKey(visitor?.outTime);
+  return Boolean(startDateKey && finalOutDateKey && startDateKey < finalOutDateKey);
+};
+
+const isRepeatedVisitorType = (visitor) => visitor?.source !== "adhoc" && isLongPeriodVisit(visitor);
+
+const getPassTrackingMeta = (visitor, now = new Date()) => {
+  const enabled = isLongPeriodVisit(visitor);
+  if (!enabled) {
+    return { enabled: false };
+  }
+
+  const todayKey = getPassDateKey(now);
+  const finalOutDateKey = getPassDateKey(visitor?.outTime);
+  const todayEvents = getDailyPassEvents(visitor).filter((event) => event?.dateKey === todayKey);
+  const issueToday = todayEvents.find((event) => event?.action === "issued");
+  const returnToday = todayEvents.find((event) => event?.action === "returned");
+  const alertSentToday = Array.isArray(visitor?.dailyPassAlertDates) && visitor.dailyPassAlertDates.includes(todayKey);
+  const trackingActive =
+    visitor?.status === "checkedIn" &&
+    Boolean(todayKey && finalOutDateKey && todayKey < finalOutDateKey);
+
+  if (visitor?.status !== "checkedIn") {
+    return {
+      enabled: true,
+      canIssue: false,
+      canReturn: false,
+      tone: "secondary",
+      summary: "Long-period visit record",
+      issueToday,
+      returnToday,
+    };
+  }
+
+  if (todayKey && finalOutDateKey && todayKey >= finalOutDateKey) {
+    return {
+      enabled: true,
+      canIssue: false,
+      canReturn: false,
+      tone: "secondary",
+      summary: "Final day of visit. Use final Check Out when the visitor leaves.",
+      issueToday,
+      returnToday,
+    };
+  }
+
+  if (returnToday) {
+    const tomorrowKey = getPassDateKey(new Date(now.getTime() + 24 * 60 * 60 * 1000));
+    const nextIssueAvailable = tomorrowKey && finalOutDateKey && tomorrowKey < finalOutDateKey;
+
+    return {
+      enabled: true,
+      canIssue: false,
+      canReturn: false,
+      tone: "success",
+      summary: `Pass returned today at ${formatIST(returnToday.recordedAt)}.`,
+      nextIssueLabel: nextIssueAvailable
+        ? `${formatDateKeyForIST(tomorrowKey)} (IST)`
+        : "Not applicable (final checkout day)",
+      issueToday,
+      returnToday,
+    };
+  }
+
+  if (issueToday) {
+    return {
+      enabled: true,
+      canIssue: false,
+      canReturn: true,
+      tone: alertSentToday ? "danger" : "warning",
+      summary: alertSentToday
+        ? `Alert sent. Today's pass was issued at ${formatIST(issueToday.recordedAt)} and is still pending return.`
+        : `Pass issued today at ${formatIST(issueToday.recordedAt)}. Awaiting return.`,
+      nextIssueLabel: "After pass return is recorded",
+      issueToday,
+      returnToday,
+    };
+  }
+
+  return {
+    enabled: true,
+    canIssue: trackingActive,
+    canReturn: false,
+    tone: trackingActive ? "primary" : "secondary",
+    summary: trackingActive
+      ? "Ready to issue today's pass."
+      : "Pass tracking becomes active only while the visitor is checked in before the final checkout day.",
+      nextIssueLabel: trackingActive ? `${formatDateKeyForIST(todayKey)} (IST)` : "",
+    issueToday,
+    returnToday,
+  };
+};
+
+const getPassStatusStyles = (tone) => {
+  switch (tone) {
+    case "success":
+      return { background: "#ecfdf3", border: "1px solid #9dd7b5", color: "#146c43" };
+    case "warning":
+      return { background: "#fff8e1", border: "1px solid #f3d37a", color: "#8a5a00" };
+    case "danger":
+      return { background: "#fff1f1", border: "1px solid #ef9a9a", color: "#9f1d1d" };
+    case "primary":
+      return { background: "#eef4ff", border: "1px solid #9fc0ff", color: "#0d47a1" };
+    default:
+      return { background: "#f4f4f5", border: "1px solid #d4d4d8", color: "#3f3f46" };
+  }
+};
+
+const getPassStatusLabel = (meta) => {
+  if (!meta?.enabled) return "Standard Visit";
+  if (meta.tone === "success") return "Returned Today";
+  if (meta.tone === "warning") return "Pending Return";
+  if (meta.tone === "danger") return "Alert Raised";
+  if (meta.tone === "primary") return "Ready To Issue";
+  return "Long-Period Visit";
+};
+
+const getPassTodayLabel = (meta) => {
+  if (!meta?.enabled) return "Not Applicable";
+  if (meta.returnToday) return "Issued + Returned";
+  if (meta.issueToday) return "Issued, Awaiting Return";
+  return "Not Issued";
+};
+
 // ✅ NEW: check if current time > tentative inTime + 24 hours
 const isOverdue24Hours = (v) => {
   if (!v?.inTime) return false;
@@ -114,6 +287,7 @@ export default function Security() {
   const [showConsent, setShowConsent] = useState(false);
   const [showCheckout, setShowCheckout] = useState(false);
   const [showBadgeEdit, setShowBadgeEdit] = useState(false);
+  const [passActionKey, setPassActionKey] = useState("");
   const [currentVisitor, setCurrentVisitor] = useState(null);
   const [badgeEditVisitor, setBadgeEditVisitor] = useState(null);
   const [badgeNo, setBadgeNo] = useState("");
@@ -169,7 +343,10 @@ export default function Security() {
 
     //--------------------------changed by rebanta------------------------------//
     // Explanation: Applies selected status to both on-screen list and export dataset.
-    if (statusFilter !== "all") {
+    if (statusFilter === "repeated") {
+      result = result.filter((v) => isRepeatedVisitorType(v));
+      exportResult = exportResult.filter((v) => isRepeatedVisitorType(v));
+    } else if (statusFilter !== "all") {
       result = result.filter((v) => v.status === statusFilter);
       exportResult = exportResult.filter((v) => v.status === statusFilter);
     }
@@ -343,6 +520,60 @@ export default function Security() {
     } catch (err) {
       console.error("❌ UPDATE FAILED:", err.response?.data || err.message);
       Swal.fire("Update failed", err.message, "error");
+    }
+  };
+
+  const recordDailyPassEvent = async (visitor, action) => {
+    if (!visitor?._id || visitor.source === "adhoc") return;
+
+    const api = process.env.REACT_APP_API_URL;
+    const endpoint =
+      visitor.source === "guest"
+        ? `${api}/api/guests/${visitor._id}/pass-events`
+        : `${api}/api/visitors/${visitor._id}/pass-events`;
+
+    const actionKey = `${visitor._id}:${action}`;
+    setPassActionKey(actionKey);
+
+    try {
+      const response = await axios.post(endpoint, {
+        action,
+        recordedBy: "Security",
+      });
+
+      const responseBody = response.data || {};
+      const updatedRecord = responseBody.guest || responseBody.visitor || responseBody;
+      if (detailsVisitor?._id === visitor._id && updatedRecord?._id) {
+        setDetailsVisitor(updatedRecord);
+      }
+
+      await fetchVisitors();
+
+      if (responseBody.alreadyRecorded) {
+        Swal.fire({
+          icon: "info",
+          title: "Already recorded",
+          text: responseBody.message || "This pass action is already recorded for today.",
+          timer: 1600,
+          showConfirmButton: false,
+        });
+      } else {
+        Swal.fire({
+          icon: "success",
+          title: action === "issued" ? "Pass issued" : "Pass returned",
+          text: responseBody.message || "Pass action saved.",
+          timer: 1200,
+          showConfirmButton: false,
+        });
+      }
+    } catch (err) {
+      Swal.fire(
+        "Pass update failed",
+        err.response?.data?.error || err.message,
+        "error"
+      );
+    } finally {
+      setPassActionKey("");
     }
   };
 
@@ -1001,6 +1232,12 @@ const getConsentLabel = (v) => {
           >
             Checked Out ({countVisitors.filter((v) => v.status === "checkedOut").length})
           </button>
+          <button
+            className={`btn btn-sm rounded-pill px-4 ${statusFilter === "repeated" ? "btn-info" : "btn-outline-info"}`}
+            onClick={() => setStatusFilter("repeated")}
+          >
+            Repeated ({countVisitors.filter((v) => isRepeatedVisitorType(v)).length})
+          </button>
           {/* info icon with tooltip explaining 7-day filter */}
           <span
             title="Only records checked out within the last 7 days are shown on screen. For older records, use Export to Excel."
@@ -1021,7 +1258,14 @@ const getConsentLabel = (v) => {
                 </p>
               </div>
             ) : (
-              filteredVisitors.map((v, i) => (
+              filteredVisitors.map((v, i) => {
+                const passTracking = getPassTrackingMeta(v);
+                const passStatusStyles = getPassStatusStyles(passTracking.tone);
+                const passStatusLabel = getPassStatusLabel(passTracking);
+                const passTodayLabel = getPassTodayLabel(passTracking);
+                const isRepeatedRecord = isRepeatedVisitorType(v);
+
+                return (
                 <motion.div
                   key={v._id}
                   className="col-md-4 mb-3"
@@ -1055,6 +1299,11 @@ const getConsentLabel = (v) => {
                       <FaUser className="me-2" />
                       {v.firstName} {v.lastName}
                     </h4>
+                    {isRepeatedRecord && (
+                      <div className="text-center mb-2">
+                        <span className="repeated-visit-chip">Repeated Visitor/Guest</span>
+                      </div>
+                    )}
                     <p>
                       <FaBuilding className="me-2" />
                       <b>Category: {v.category || "-"}</b> 
@@ -1092,6 +1341,33 @@ const getConsentLabel = (v) => {
                       <b>Status:</b> <span className="badge bg-dark rounded-pill px-3">{v.status?.toUpperCase()}</span>
                     </p>
 
+                    {passTracking.enabled && (
+                      <div className="pass-panel rounded-3 p-3 mb-3" style={passStatusStyles}>
+                        <div className="pass-panel-header mb-2">
+                          <div className="fw-semibold">Daily Pass Tracking</div>
+                          <span className={`pass-status-chip pass-status-${passTracking.tone || "secondary"}`}>
+                            {passStatusLabel}
+                          </span>
+                        </div>
+
+                        <div className="small pass-summary-text">{passTracking.summary}</div>
+
+                        <div className="pass-mini-grid mt-2">
+                          <div className="pass-mini-card">
+                            <div className="pass-mini-label">Today's Status</div>
+                            <div className="pass-mini-value">{passTodayLabel}</div>
+                          </div>
+                          <div className="pass-mini-card">
+                            <div className="pass-mini-label">Next Issue</div>
+                            <div className="pass-mini-value">{passTracking.nextIssueLabel || "Will appear automatically"}</div>
+                          </div>
+                        </div>
+                        <div className="small mt-1">
+                          <b>Visit Window:</b> {formatIST(v.inTime)} to {formatIST(v.outTime)}
+                        </div>
+                      </div>
+                    )}
+
                     {v.displaySignature && (
                       <div className="text-center my-2">
                         <img src={v.displaySignature} alt="signature" width={150} className="border rounded p-2" />
@@ -1125,10 +1401,28 @@ const getConsentLabel = (v) => {
 
 
                     {v.status === "checkedIn" && (
-                      <div className="d-flex justify-content-center gap-2 mt-3 flex-wrap">
+                      <div className="d-flex justify-content-center gap-2 mt-3 flex-wrap action-row-modern">
                         <button className="btn btn-outline-primary btn-sm rounded-pill" onClick={() => handleBadgeEditOpen(v)}>
                           <FaEdit className="me-1" /> Edit Badge
                         </button>
+                        {passTracking.enabled && passTracking.canIssue && v.source !== "adhoc" && (
+                          <button
+                            className="btn btn-success btn-sm rounded-pill pass-action-btn"
+                            onClick={() => recordDailyPassEvent(v, "issued")}
+                            disabled={passActionKey === `${v._id}:issued`}
+                          >
+                            Issue Pass
+                          </button>
+                        )}
+                        {passTracking.enabled && passTracking.canReturn && v.source !== "adhoc" && (
+                          <button
+                            className="btn btn-danger btn-sm rounded-pill pass-action-btn"
+                            onClick={() => recordDailyPassEvent(v, "returned")}
+                            disabled={passActionKey === `${v._id}:returned`}
+                          >
+                            Return Pass
+                          </button>
+                        )}
                         <button className="btn btn-outline-dark btn-sm rounded-pill" onClick={() => printCard(v)}>
                           <FaPrint className="me-1" /> Print Card
                         </button>
@@ -1146,7 +1440,8 @@ const getConsentLabel = (v) => {
                     )}
                   </div>
                 </motion.div>
-              ))
+                );
+              })
             )}
           </div>
         )}
@@ -1539,6 +1834,32 @@ const getConsentLabel = (v) => {
                     {detailsVisitor.guestWifiRequired ? "Yes" : "No"}
                   </div>
 
+                  {detailsVisitor.source !== "adhoc" && isLongPeriodVisit(detailsVisitor) && (
+                    <div className="col-12 mt-3">
+                      <div className="border rounded-3 p-3" style={{ background: "#f8f9fa" }}>
+                        <div className="fw-bold mb-2">Daily Pass History</div>
+                        <div className="small text-muted mb-2">
+                          {getPassTrackingMeta(detailsVisitor).summary}
+                        </div>
+                        {getDailyPassEvents(detailsVisitor).length === 0 ? (
+                          <div className="small text-muted">No daily pass actions recorded yet.</div>
+                        ) : (
+                          <div className="d-flex flex-column gap-2">
+                            {getDailyPassEvents(detailsVisitor)
+                              .slice()
+                              .sort((a, b) => new Date(b.recordedAt) - new Date(a.recordedAt))
+                              .map((event, index) => (
+                                <div key={`${event.dateKey}-${event.action}-${index}`} className="small border rounded-3 px-3 py-2 bg-white">
+                                  <b>{event.action === "issued" ? "Issued" : "Returned"}</b> on {event.dateKey} at {formatIST(event.recordedAt)}
+                                  {event.badgeNoAtEvent ? ` | Badge ${event.badgeNoAtEvent}` : ""}
+                                </div>
+                              ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
 
                   
                 </div>
@@ -1570,6 +1891,98 @@ const getConsentLabel = (v) => {
         .fancy-card:hover {
           transform: translateY(-8px);
           box-shadow: 0 14px 28px rgba(0, 0, 0, 0.3);
+        }
+        .repeated-visit-chip {
+          display: inline-block;
+          font-size: 0.74rem;
+          font-weight: 700;
+          letter-spacing: 0.2px;
+          border: 1px solid #74b9ff;
+          color: #0b4f8a;
+          background: #edf6ff;
+          border-radius: 999px;
+          padding: 3px 10px;
+        }
+        .pass-panel {
+          box-shadow: 0 8px 16px rgba(2, 6, 23, 0.08);
+        }
+        .pass-panel-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+        }
+        .pass-summary-text {
+          line-height: 1.45;
+        }
+        .pass-status-chip {
+          font-size: 0.68rem;
+          font-weight: 700;
+          padding: 4px 10px;
+          border-radius: 999px;
+          border: 1px solid transparent;
+          white-space: nowrap;
+        }
+        .pass-status-success {
+          color: #0f5132;
+          background: rgba(16, 185, 129, 0.15);
+          border-color: rgba(16, 185, 129, 0.45);
+        }
+        .pass-status-warning {
+          color: #7a4b00;
+          background: rgba(251, 191, 36, 0.2);
+          border-color: rgba(251, 191, 36, 0.45);
+        }
+        .pass-status-danger {
+          color: #9f1239;
+          background: rgba(244, 63, 94, 0.15);
+          border-color: rgba(244, 63, 94, 0.45);
+        }
+        .pass-status-primary {
+          color: #1d4ed8;
+          background: rgba(59, 130, 246, 0.15);
+          border-color: rgba(59, 130, 246, 0.45);
+        }
+        .pass-status-secondary {
+          color: #52525b;
+          background: rgba(161, 161, 170, 0.15);
+          border-color: rgba(161, 161, 170, 0.45);
+        }
+        .pass-mini-grid {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 8px;
+        }
+        .pass-mini-card {
+          background: rgba(255, 255, 255, 0.65);
+          border: 1px solid rgba(15, 23, 42, 0.12);
+          border-radius: 10px;
+          padding: 8px 10px;
+        }
+        .pass-mini-label {
+          font-size: 0.66rem;
+          font-weight: 700;
+          letter-spacing: 0.24px;
+          text-transform: uppercase;
+          opacity: 0.8;
+        }
+        .pass-mini-value {
+          font-size: 0.78rem;
+          margin-top: 2px;
+          line-height: 1.35;
+        }
+        .action-row-modern {
+          border-top: 1px dashed rgba(15, 23, 42, 0.18);
+          padding-top: 10px;
+        }
+        .pass-action-btn {
+          font-weight: 700;
+          letter-spacing: 0.15px;
+        }
+        @media (min-width: 768px) {
+          .pass-mini-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
         }
         .consent-text {
           font-size: 14px;
