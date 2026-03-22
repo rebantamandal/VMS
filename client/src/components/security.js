@@ -146,6 +146,13 @@ const isFinalCheckoutDay = (visitor, now = new Date()) => {
   return Boolean(todayKey && finalOutDateKey && todayKey === finalOutDateKey);
 };
 
+const isAfterFinalCheckoutDay = (visitor, now = new Date()) => {
+  // Keeps a clear checkout path when a repeated record is still checked in after the final day.
+  const todayKey = getPassDateKey(now);
+  const finalOutDateKey = getPassDateKey(visitor?.outTime);
+  return Boolean(todayKey && finalOutDateKey && todayKey > finalOutDateKey);
+};
+
 const getPassTrackingMeta = (visitor, now = new Date()) => {
   const enabled = isLongPeriodVisit(visitor);
   if (!enabled) {
@@ -270,6 +277,26 @@ const getPassTodayLabel = (meta) => {
   return "Not Issued";
 };
 
+const getRepeatPrimaryAction = (visitor, passTracking) => {
+  // Guides guards with one clear next step for repeated checked-in records.
+  if (!visitor || visitor.status !== "checkedIn" || !isRepeatedVisitorType(visitor)) return null;
+
+  if (passTracking?.canIssue) {
+    return { kind: "issued", label: "Issue Pass", className: "btn btn-success btn-sm rounded-pill pass-action-btn" };
+  }
+
+  if (passTracking?.canReturn) {
+    return { kind: "returned", label: "Return Pass", className: "btn btn-danger btn-sm rounded-pill pass-action-btn" };
+  }
+
+  return null;
+};
+
+const isPassActionBusyForVisitor = (visitorId, passActionKey) => {
+  // Prevents duplicate pass clicks across card and details modal for the same record.
+  return Boolean(visitorId && passActionKey && passActionKey.startsWith(`${visitorId}:`));
+};
+
 // ✅ NEW: check if current time > tentative inTime + 24 hours
 const isOverdue24Hours = (v) => {
   if (!v?.inTime) return false;
@@ -345,7 +372,8 @@ export default function Security() {
   }, []);
   // ✅ NEW: trigger rerender so overdue button appears when time passes
   useEffect(() => {
-  const t = setInterval(() => setNowTick(Date.now()), 30000);
+  // Refreshes time-based pass state frequently enough to avoid day-boundary confusion around midnight.
+  const t = setInterval(() => setNowTick(Date.now()), 5000);
   return () => clearInterval(t);
 }, []);
 
@@ -840,6 +868,19 @@ const getExpiryDate = () => {
   };
   //-----------------------Changes by Anup----------------------------------------------------------------------------------------------------
 
+  useEffect(() => {
+    // Keeps the open details modal in sync with the latest fetched record state.
+    if (!showDetails || !detailsVisitor?._id) return;
+
+    const refreshedDetailsVisitor = visitors.find(
+      (visitor) => visitor._id === detailsVisitor._id && visitor.source === detailsVisitor.source
+    );
+
+    if (refreshedDetailsVisitor) {
+      setDetailsVisitor(refreshedDetailsVisitor);
+    }
+  }, [visitors, showDetails, detailsVisitor]);
+
   const isGuestSource = (src) => src === "guest";
 
 const getConsentSalutation = (v) => {
@@ -851,6 +892,21 @@ const getConsentLabel = (v) => {
   if (!v) return "Visitor's Consent:";
   return isGuestSource(v.source) ? "Guest's Consent:" : "Visitor's Consent:";
 };
+
+  // Reuses the same derived details state across the modal instead of recomputing it inline.
+  const detailsNow = detailsVisitor ? new Date(nowTick) : null;
+  const detailsPassMeta = detailsVisitor ? getPassTrackingMeta(detailsVisitor, detailsNow) : null;
+  const detailsPassEvents = detailsVisitor ? getDailyPassEvents(detailsVisitor) : [];
+  const detailsIsRepeated = detailsVisitor ? isRepeatedVisitorType(detailsVisitor) : false;
+  const detailsIsFinalDay = detailsVisitor ? isFinalCheckoutDay(detailsVisitor, detailsNow) : false;
+  const detailsIsAfterFinalDay = detailsVisitor ? isAfterFinalCheckoutDay(detailsVisitor, detailsNow) : false;
+  const detailsIsBeforeFinalDay = detailsIsRepeated && !detailsIsFinalDay && !detailsIsAfterFinalDay;
+  const detailsPrimaryAction = detailsVisitor ? getRepeatPrimaryAction(detailsVisitor, detailsPassMeta) : null;
+  const detailsPassActionBusy = detailsVisitor
+    ? isPassActionBusyForVisitor(detailsVisitor._id, passActionKey)
+    : false;
+  const requirePassFlowBeforeFinalCheckout =
+    detailsIsRepeated && detailsIsFinalDay && !detailsPassMeta?.returnToday;
 
 
   const exportToExcel = () => {
@@ -1272,14 +1328,21 @@ const getConsentLabel = (v) => {
               </div>
             ) : (
               filteredVisitors.map((v, i) => {
-                const passTracking = getPassTrackingMeta(v);
+                // Uses the shared time tick so date-based actions update consistently in the UI.
+                const guardNow = new Date(nowTick);
+                const passTracking = getPassTrackingMeta(v, guardNow);
                 const passStatusStyles = getPassStatusStyles(passTracking.tone);
                 const passStatusLabel = getPassStatusLabel(passTracking);
                 const passTodayLabel = getPassTodayLabel(passTracking);
                 const isRepeatedRecord = isRepeatedVisitorType(v);
-                // Final-day repeated records should move to checkout-only once return is recorded.
-                const isFinalDayRepeated = isRepeatedRecord && isFinalCheckoutDay(v);
-                const showOnlyCheckout = isFinalDayRepeated && Boolean(passTracking.returnToday);
+                const repeatPrimaryAction = getRepeatPrimaryAction(v, passTracking);
+                const isPassActionBusy = isPassActionBusyForVisitor(v._id, passActionKey);
+                // Final-day (after return) and post-final-day repeated records should be checkout-only.
+                const isFinalDayRepeated = isRepeatedRecord && isFinalCheckoutDay(v, guardNow);
+                const isAfterFinalDayRepeated = isRepeatedRecord && isAfterFinalCheckoutDay(v, guardNow);
+                const showOnlyCheckout =
+                  (isFinalDayRepeated && Boolean(passTracking.returnToday)) ||
+                  isAfterFinalDayRepeated;
 
                 return (
                 <motion.div
@@ -1418,7 +1481,8 @@ const getConsentLabel = (v) => {
 
                     {v.status === "checkedIn" && (
                       <div className="d-flex justify-content-center gap-2 mt-3 flex-wrap action-row-modern">
-                        {showOnlyCheckout ? (
+                        {isRepeatedRecord ? (
+                          showOnlyCheckout ? (
                           <>
                             <button className="btn btn-outline-dark btn-sm rounded-pill" onClick={() => openDetails(v)}>
                               {/* Keep View Details always available, including checkout-only state. */}
@@ -1429,6 +1493,37 @@ const getConsentLabel = (v) => {
                               Check Out
                             </button>
                           </>
+                          ) : (
+                            <>
+                              <button className="btn btn-outline-primary btn-sm rounded-pill" onClick={() => handleBadgeEditOpen(v)}>
+                                <FaEdit className="me-1" /> Edit Badge
+                              </button>
+                              {repeatPrimaryAction?.kind === "issued" && (
+                                <button
+                                  className={repeatPrimaryAction.className}
+                                  onClick={() => recordDailyPassEvent(v, "issued")}
+                                  disabled={isPassActionBusy}
+                                >
+                                  {repeatPrimaryAction.label}
+                                </button>
+                              )}
+                              {repeatPrimaryAction?.kind === "returned" && (
+                                <button
+                                  className={repeatPrimaryAction.className}
+                                  onClick={() => recordDailyPassEvent(v, "returned")}
+                                  disabled={isPassActionBusy}
+                                >
+                                  {repeatPrimaryAction.label}
+                                </button>
+                              )}
+                              <button className="btn btn-outline-dark btn-sm rounded-pill" onClick={() => printCard(v)}>
+                                <FaPrint className="me-1" /> Print Card
+                              </button>
+                              <button className="btn btn-outline-dark btn-sm rounded-pill" onClick={() => openDetails(v)}>
+                                View Details
+                              </button>
+                            </>
+                          )
                         ) : (
                           <>
                             <button className="btn btn-outline-primary btn-sm rounded-pill" onClick={() => handleBadgeEditOpen(v)}>
@@ -1438,7 +1533,7 @@ const getConsentLabel = (v) => {
                               <button
                                 className="btn btn-success btn-sm rounded-pill pass-action-btn"
                                 onClick={() => recordDailyPassEvent(v, "issued")}
-                                disabled={passActionKey === `${v._id}:issued`}
+                                disabled={isPassActionBusy}
                               >
                                 Issue Pass
                               </button>
@@ -1447,7 +1542,7 @@ const getConsentLabel = (v) => {
                               <button
                                 className="btn btn-danger btn-sm rounded-pill pass-action-btn"
                                 onClick={() => recordDailyPassEvent(v, "returned")}
-                                disabled={passActionKey === `${v._id}:returned`}
+                                disabled={isPassActionBusy}
                               >
                                 Return Pass
                               </button>
@@ -1873,13 +1968,13 @@ const getConsentLabel = (v) => {
                       <div className="border rounded-3 p-3" style={{ background: "#f8f9fa" }}>
                         <div className="fw-bold mb-2">Daily Pass History</div>
                         <div className="small text-muted mb-2">
-                          {getPassTrackingMeta(detailsVisitor).summary}
+                          {detailsPassMeta?.summary}
                         </div>
-                        {getDailyPassEvents(detailsVisitor).length === 0 ? (
+                        {detailsPassEvents.length === 0 ? (
                           <div className="small text-muted">No daily pass actions recorded yet.</div>
                         ) : (
                           <div className="d-flex flex-column gap-2">
-                            {getDailyPassEvents(detailsVisitor)
+                            {detailsPassEvents
                               .slice()
                               .sort((a, b) => new Date(b.recordedAt) - new Date(a.recordedAt))
                               .map((event, index) => (
@@ -1899,24 +1994,34 @@ const getConsentLabel = (v) => {
                 </div>
 
                 <div className="text-center mt-4 d-flex justify-content-center gap-2 flex-wrap">
-                  {detailsVisitor.status === "checkedIn" && (() => {
-                    // Checkout is optional in View Details until final day for repeated records.
-                    const detailsPassMeta = getPassTrackingMeta(detailsVisitor);
-                    const detailsIsRepeated = isRepeatedVisitorType(detailsVisitor);
-                    const detailsIsFinalDay = isFinalCheckoutDay(detailsVisitor);
-                    const requireReturnBeforeFinalCheckout =
-                      detailsIsRepeated &&
-                      detailsIsFinalDay &&
-                      Boolean(detailsPassMeta.issueToday && !detailsPassMeta.returnToday);
-
-                    return (
+                  {detailsVisitor.status === "checkedIn" && (
+                    <>
+                      {detailsPrimaryAction?.kind === "issued" && (
+                        <button
+                          className="btn btn-success rounded-pill px-4"
+                          onClick={() => recordDailyPassEvent(detailsVisitor, "issued")}
+                          disabled={detailsPassActionBusy}
+                        >
+                          {/* Mirrors the single next-step action inside details modal. */}
+                          Issue Pass
+                        </button>
+                      )}
+                      {detailsPrimaryAction?.kind === "returned" && (
+                        <button
+                          className="btn btn-danger rounded-pill px-4"
+                          onClick={() => recordDailyPassEvent(detailsVisitor, "returned")}
+                          disabled={detailsPassActionBusy}
+                        >
+                          Return Pass
+                        </button>
+                      )}
                       <button
                         className="btn btn-warning rounded-pill px-4"
-                        disabled={requireReturnBeforeFinalCheckout}
+                        disabled={requirePassFlowBeforeFinalCheckout}
                         title={
-                          requireReturnBeforeFinalCheckout
-                            ? "Return today's pass before final checkout"
-                            : detailsIsRepeated && !detailsIsFinalDay
+                          requirePassFlowBeforeFinalCheckout
+                            ? "Complete today's Issue Pass and Return Pass before final checkout"
+                            : detailsIsBeforeFinalDay
                               ? "Optional until the final day"
                               : "Proceed to checkout"
                         }
@@ -1925,10 +2030,10 @@ const getConsentLabel = (v) => {
                           openCheckout(detailsVisitor);
                         }}
                       >
-                        {detailsIsRepeated && !detailsIsFinalDay ? "Optional Check Out" : "Check Out"}
+                        {detailsIsBeforeFinalDay ? "Optional Check Out" : "Check Out"}
                       </button>
-                    );
-                  })()}
+                    </>
+                  )}
                   <button
                     className="btn btn-dark rounded-pill px-4"
                     onClick={() => setShowDetails(false)} 

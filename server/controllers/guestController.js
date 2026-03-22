@@ -1,7 +1,11 @@
 import { getDeleteDateAfterOneYear } from "../utils/dateUtils.js";
 import Guest from "../models/Guest.js";
 import { sendGuestWifiEmail, sendMeetingRoomEmail, sendRefreshmentEmail } from "../email/emailservice.js";
-import { addPassEventAtomic, ensureInitialPassIssued } from "../utils/passTracking.js";
+import {
+  addPassEventAtomic,
+  ensureInitialPassIssued,
+  requiresFinalDayPassReturnBeforeCheckout,
+} from "../utils/passTracking.js";
 
 // CREATE MULTIPLE GUESTS
 export const createGuests = async (req, res) => {
@@ -59,6 +63,16 @@ export const updateGuest = async (req, res) => {
 
     const updateData = { ...req.body };
     const wasCheckedIn = guest.status === "checkedIn";
+    if (
+      // Blocks direct final-day checkout until today's pass has been returned.
+      updateData.status === "checkedOut" &&
+      wasCheckedIn &&
+      requiresFinalDayPassReturnBeforeCheckout(guest)
+    ) {
+      return res.status(400).json({
+        error: "Complete today's Issue Pass and Return Pass before final checkout.",
+      });
+    }
 
     if (updateData.status === "checkedIn" && !updateData.actualInTime) {
       updateData.actualInTime = new Date();

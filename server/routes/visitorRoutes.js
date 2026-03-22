@@ -1,6 +1,10 @@
 import express from "express";
 import Visitor from "../models/Visitor.js";
-import { addPassEventAtomic, ensureInitialPassIssued } from "../utils/passTracking.js";
+import {
+  addPassEventAtomic,
+  ensureInitialPassIssued,
+  requiresFinalDayPassReturnBeforeCheckout,
+} from "../utils/passTracking.js";
 import { resolveOfficialHostEmail, sendCheckoutEmailToHost } from "../email/emailservice.js";
 
 const router = express.Router();
@@ -41,6 +45,17 @@ router.put("/:id", async (req, res) => {
 
     const wasCheckedIn = visitor.status === "checkedIn";
     const wasCheckedOut = visitor.status === "checkedOut";
+    if (
+      // Blocks direct final-day checkout until today's pass has been returned.
+      req.body?.status === "checkedOut" &&
+      wasCheckedIn &&
+      requiresFinalDayPassReturnBeforeCheckout(visitor)
+    ) {
+      return res.status(400).json({
+        error: "Complete today's Issue Pass and Return Pass before final checkout.",
+      });
+    }
+
     Object.assign(visitor, req.body);
 
     if (visitor.status === "checkedIn" && !visitor.actualInTime) {

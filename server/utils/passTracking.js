@@ -67,6 +67,20 @@ export const hasPassEventForDate = (record, action, dateKey) => {
   );
 };
 
+export const requiresFinalDayPassReturnBeforeCheckout = (record, value = new Date()) => {
+  // Enforces the final-day sequence only for long-term visits on the scheduled last day.
+  if (!isLongTermVisit(record)) return false;
+
+  const currentDateKey = getPassDateKey(value);
+  const finalOutDateKey = getPassDateKey(record?.outTime);
+
+  if (!currentDateKey || !finalOutDateKey || currentDateKey !== finalOutDateKey) {
+    return false;
+  }
+
+  return !hasPassEventForDate(record, "returned", currentDateKey);
+};
+
 export const getLatestPassEvent = (record) => {
   const events = getDailyPassEvents(record);
   if (events.length === 0) return null;
