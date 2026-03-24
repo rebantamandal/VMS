@@ -127,6 +127,12 @@ export default function Navbar({ exportToExcel, adhoc, profileAction, profileLab
             )}
             {/* ------------------------------------------------- */}
 
+            {typeof profileAction !== "function" && userName && userName !== "Security" && (
+              <span style={{ color: "#1e293b", fontWeight: 600, fontSize: "0.88rem", whiteSpace: "nowrap" }}>
+                Welcome, {userName.split(" ")[0]}
+              </span>
+            )}
+
             {/* -----------------changed by rebanta-------------- */}
             {/* Removed boxShadow from whileHover on Home/logout button */}
             <motion.button
