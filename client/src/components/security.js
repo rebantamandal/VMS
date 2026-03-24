@@ -2027,30 +2027,86 @@ const getConsentLabel = (v) => {
                   </div>
 
                   {/* -----------------changed by rebanta-------------- */}
-                  {/* New: collapsible daily pass history section — lists all issue/return
-                      events in reverse chronological order for repeated visitor records */}
+                  {/* Pass history section: groups issue+return pairs into cycle rows shown as a table */}
                   {detailsVisitor.source !== "adhoc" && isLongPeriodVisit(detailsVisitor) && (
                     <div className="col-12 mt-3">
                       <div className="border rounded-3 p-3" style={{ background: "#f8f9fa" }}>
-                        <div className="fw-bold mb-2">Daily Pass History</div>
-                        <div className="small text-muted mb-2">
-                          {detailsPassMeta?.summary}
-                        </div>
+                        <div className="fw-bold mb-2">Pass History</div>
                         {detailsPassEvents.length === 0 ? (
                           <div className="small text-muted">No daily pass actions recorded yet.</div>
-                        ) : (
-                          <div className="d-flex flex-column gap-2">
-                            {detailsPassEvents
-                              .slice()
-                              .sort((a, b) => new Date(b.recordedAt) - new Date(a.recordedAt))
-                              .map((event, index) => (
-                                <div key={`${event.dateKey}-${event.action}-${index}`} className="small border rounded-3 px-3 py-2 bg-white">
-                                  <b>{event.action === "issued" ? "Issued" : "Returned"}</b> on {event.dateKey} at {formatIST(event.recordedAt)}
-                                  {event.badgeNoAtEvent ? ` | Badge ${event.badgeNoAtEvent}` : ""}
-                                </div>
-                              ))}
-                          </div>
-                        )}
+                        ) : (() => {
+                          // Group events by dateKey, pair issue+return into cycle rows
+                          const byDate = {};
+                          detailsPassEvents.forEach((ev) => {
+                            if (!byDate[ev.dateKey]) byDate[ev.dateKey] = [];
+                            byDate[ev.dateKey].push(ev);
+                          });
+
+                          const rows = [];
+                          Object.keys(byDate)
+                            .sort((a, b) => (a < b ? -1 : 1))
+                            .forEach((dateKey) => {
+                              const events = byDate[dateKey];
+                              const issues = events
+                                .filter((e) => e.action === "issued")
+                                .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
+                              const returns = events
+                                .filter((e) => e.action === "returned")
+                                .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
+                              const cycleCount = Math.max(issues.length, returns.length);
+                              for (let c = 0; c < cycleCount; c++) {
+                                rows.push({
+                                  dateKey,
+                                  cycle: c + 1,
+                                  issuedAt: issues[c]?.recordedAt || null,
+                                  returnedAt: returns[c]?.recordedAt || null,
+                                });
+                              }
+                            });
+
+                          // Reverse so newest cycle is first
+                          rows.reverse();
+
+                          return (
+                            <div style={{ overflowX: "auto" }}>
+                              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
+                                <thead>
+                                  <tr style={{ background: "#e9ecef", textAlign: "left" }}>
+                                    <th style={{ padding: "8px 12px", borderBottom: "2px solid #dee2e6", whiteSpace: "nowrap" }}>Date</th>
+                                    <th style={{ padding: "8px 12px", borderBottom: "2px solid #dee2e6" }}>Cycle</th>
+                                    <th style={{ padding: "8px 12px", borderBottom: "2px solid #dee2e6", whiteSpace: "nowrap" }}>Issued At</th>
+                                    <th style={{ padding: "8px 12px", borderBottom: "2px solid #dee2e6", whiteSpace: "nowrap" }}>Returned At</th>
+                                    <th style={{ padding: "8px 12px", borderBottom: "2px solid #dee2e6" }}>Status</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {rows.map((row, idx) => (
+                                    <tr key={`${row.dateKey}-${row.cycle}`} style={{ background: idx % 2 === 0 ? "#fff" : "#f8f9fa", borderBottom: "1px solid #dee2e6" }}>
+                                      <td style={{ padding: "7px 12px", whiteSpace: "nowrap" }}>{row.dateKey}</td>
+                                      <td style={{ padding: "7px 12px" }}>{row.cycle}</td>
+                                      <td style={{ padding: "7px 12px", whiteSpace: "nowrap" }}>{row.issuedAt ? formatIST(row.issuedAt) : "-"}</td>
+                                      <td style={{ padding: "7px 12px", whiteSpace: "nowrap" }}>{row.returnedAt ? formatIST(row.returnedAt) : "-"}</td>
+                                      <td style={{ padding: "7px 12px" }}>
+                                        <span style={{
+                                          display: "inline-block",
+                                          padding: "2px 10px",
+                                          borderRadius: "20px",
+                                          fontSize: "0.78rem",
+                                          fontWeight: 600,
+                                          background: row.returnedAt ? "#1e293b" : "#fef9c3",
+                                          color: row.returnedAt ? "#f8fafc" : "#713f12",
+                                          border: row.returnedAt ? "none" : "1px solid #fde68a",
+                                        }}>
+                                          {row.returnedAt ? "Returned" : "Issued"}
+                                        </span>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
                   )}
