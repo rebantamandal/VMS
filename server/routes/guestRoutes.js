@@ -4,7 +4,10 @@ import {
   getGuests,
   getGuestById,
   updateGuest,
+  // -----------------changed by rebanta--------------
+  // Added controller for guest daily pass issue/return event recording
   addGuestPassEvent,
+  // -------------------------------------------------
   deleteGuest,
   removeGuestFromUI,
 } from "../controllers/guestController.js"; // make sure controller is also ESM
@@ -23,7 +26,10 @@ router.get("/:id", getGuestById);
 // UPDATE GUEST
 router.put("/:id", updateGuest);
 
+// -----------------changed by rebanta--------------
+// New route for recording guest daily pass issue/return actions
 router.post("/:id/pass-events", addGuestPassEvent);
+// -------------------------------------------------
 
 // DELETE GUEST
 router.delete("/:id", deleteGuest);

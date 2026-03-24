@@ -1,5 +1,7 @@
 import mongoose from "mongoose";
 
+// -----------------changed by rebanta--------------
+// New embedded schema for daily pass issue/return history stored directly on each guest record
 const dailyPassEventSchema = new mongoose.Schema(
   {
     action: {
@@ -29,6 +31,7 @@ const dailyPassEventSchema = new mongoose.Schema(
   },
   { _id: false }
 );
+// -------------------------------------------------
 
 const guestSchema = new mongoose.Schema(
   {
@@ -91,6 +94,9 @@ const guestSchema = new mongoose.Schema(
 
     submittedBy: { type: String },
 
+    // -----------------changed by rebanta--------------
+    // New pass-tracking fields: dailyPassEvents stores issue/return history and
+    // dailyPassAlertDates records which IST dates already triggered a host alert
     dailyPassEvents: {
       type: [dailyPassEventSchema],
       default: [],
@@ -100,6 +106,7 @@ const guestSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    // -------------------------------------------------
 
     status: {
       type: String,

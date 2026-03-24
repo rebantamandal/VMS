@@ -45,6 +45,9 @@ async function sendEmail(message) {
   }
 }
 
+// -----------------changed by rebanta--------------
+// Added email normalization helpers so downstream notification flows can resolve a valid
+// official host email from hostEmail, submittedBy, or host fields before sending alerts
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const normalizeEmail = (value) => {
@@ -66,12 +69,17 @@ export const resolveOfficialHostEmail = (visitor) => {
 
   return "";
 };
+// -------------------------------------------------
 
 /* ====================== WIFI EMAIL ====================== */
 export async function sendGuestWifiEmail(visitor) {
   const name = `${visitor.firstName || ""} ${visitor.lastName || ""}`.trim() || "Visitor";
+  // -----------------changed by rebanta--------------
+  // Replaced formatIST helper usage with direct en-IN locale formatting and updated the
+  // greeting copy in the HTML template
   const inTime = visitor.inTime ? new Date(visitor.inTime).toLocaleString("en-IN") : "Not Provided";
   const outTime = visitor.outTime ? new Date(visitor.outTime).toLocaleString("en-IN") : "Not Provided";
+  // -------------------------------------------------
 
   const subject = "Guest Wi-Fi Access Request";
 
@@ -123,8 +131,11 @@ export async function sendGuestWifiEmail(visitor) {
 /* ====================== ADHOC WIFI EMAIL ====================== */
 export async function sendAdhocWifiEmail(visitor) {
   const name = `${visitor.firstName || ""} ${visitor.lastName || ""}`.trim() || "Visitor";
+  // -----------------changed by rebanta--------------
+  // Replaced formatIST helper usage with direct en-IN locale formatting for adhoc Wi-Fi requests
   const inTime = visitor.inTime ? new Date(visitor.inTime).toLocaleString("en-IN") : "Not Provided";
   const outTime = visitor.outTime ? new Date(visitor.outTime).toLocaleString("en-IN") : "Not Provided";
+  // -------------------------------------------------
 
   const subject = "Adhoc Visitor – Guest Wi-Fi Request";
 
@@ -180,8 +191,11 @@ export async function sendAdhocWifiEmail(visitor) {
 /* ====================== MEETING ROOM EMAIL ====================== */
 export async function sendMeetingRoomEmail(visitor) {
   const name = `${visitor.firstName || ""} ${visitor.lastName || ""}`.trim() || "Visitor";
+  // -----------------changed by rebanta--------------
+  // Replaced formatIST helper usage with direct en-IN locale formatting for meeting room requests
   const inTime = visitor.inTime ? new Date(visitor.inTime).toLocaleString("en-IN") : "Not Provided";
   const outTime = visitor.outTime ? new Date(visitor.outTime).toLocaleString("en-IN") : "Not Provided";
+  // -------------------------------------------------
 
   const subject = "Meeting Room Booking – Guest Request";
 
@@ -233,9 +247,12 @@ export async function sendMeetingRoomEmail(visitor) {
 /* ====================== REFRESHMENT EMAIL ====================== */
 export async function sendRefreshmentEmail(visitor) {
   const name = `${visitor.firstName || ""} ${visitor.lastName || ""}`.trim() || "Visitor";
+  // -----------------changed by rebanta--------------
+  // Replaced formatIST helper usage with direct en-IN locale formatting for refreshment requests
   const proposedTime = visitor.proposedRefreshmentTime
     ? new Date(visitor.proposedRefreshmentTime).toLocaleString("en-IN")
     : "Not Provided";
+  // -------------------------------------------------
 
   const subject = "Refreshment Request – Guest";
 
@@ -291,8 +308,11 @@ export async function sendOverstayEmailToHost({ type, visitor, toHostEmail }) {
 
   const name = `${visitor.firstName || ""} ${visitor.lastName || ""}`.trim() || "Visitor";
   const hostName = visitor.host || "Host";
+  // -----------------changed by rebanta--------------
+  // Replaced formatIST helper usage with direct locale formatting for overstay notifications
   const outTime = visitor.outTime ? new Date(visitor.outTime).toLocaleString("en-IN") : "N/A";
   const now = new Date().toLocaleString("en-IN");
+  // -------------------------------------------------
 
   const subject = `Overstay Alert: ${name} has exceeded scheduled check-out time`;
 
@@ -343,6 +363,9 @@ export async function sendOverstayEmailToHost({ type, visitor, toHostEmail }) {
   await sendEmail(message);
 }
 
+// -----------------changed by rebanta--------------
+// New: sends a daily pass return alert to the host when a repeated visitor/guest has an
+// issued pass for today but Security has not yet recorded the return action
 export async function sendDailyPassReturnAlertEmail({ type, visitor, toHostEmail, issuedAt, dateKey }) {
   if (!toHostEmail) {
     console.warn("⚠️ No host email provided; cannot send daily pass return alert.");
@@ -402,7 +425,11 @@ export async function sendDailyPassReturnAlertEmail({ type, visitor, toHostEmail
 
   await sendEmail(message);
 }
+// -------------------------------------------------
 
+// -----------------changed by rebanta--------------
+// New: sends a checkout confirmation email to the resolved host address after a visitor
+// or guest is fully checked out, including tentative and actual checkout timestamps
 export async function sendCheckoutEmailToHost({ type = "visitor", visitor, toHostEmail }) {
   if (!toHostEmail) {
     console.warn("⚠️ No host official email provided; cannot send checkout notification.");
@@ -458,3 +485,4 @@ export async function sendCheckoutEmailToHost({ type = "visitor", visitor, toHos
 
   await sendEmail(message);
 }
+// -------------------------------------------------

@@ -1,11 +1,15 @@
 import { getDeleteDateAfterOneYear } from "../utils/dateUtils.js";
 import Guest from "../models/Guest.js";
 import { sendGuestWifiEmail, sendMeetingRoomEmail, sendRefreshmentEmail } from "../email/emailservice.js";
+// -----------------changed by rebanta--------------
+// Added pass-tracking helpers to support initial pass issuance, atomic pass event writes,
+// and final-day checkout validation for repeated guests
 import {
   addPassEventAtomic,
   ensureInitialPassIssued,
   requiresFinalDayPassReturnBeforeCheckout,
 } from "../utils/passTracking.js";
+// -------------------------------------------------
 
 // CREATE MULTIPLE GUESTS
 export const createGuests = async (req, res) => {
@@ -58,6 +62,9 @@ export const getGuestById = async (req, res) => {
 // UPDATE GUEST
 export const updateGuest = async (req, res) => {
   try {
+    // -----------------changed by rebanta--------------
+    // Refactored update flow: load the guest first, block final-day checkout until today's
+    // pass is returned, apply updates in-memory, and auto-seed initial pass issuance on first check-in
     const guest = await Guest.findById(req.params.id);
     if (!guest) return res.status(404).json({ error: "Guest not found" });
 
@@ -95,6 +102,7 @@ export const updateGuest = async (req, res) => {
     }
 
     await guest.save();
+    // -------------------------------------------------
 
     res.json({ message: "Guest updated successfully", guest });
   } catch (err) {
@@ -102,6 +110,8 @@ export const updateGuest = async (req, res) => {
   }
 };
 
+// -----------------changed by rebanta--------------
+// New endpoint: records guest pass issue/return actions atomically and returns the updated record
 export const addGuestPassEvent = async (req, res) => {
   try {
     const result = await addPassEventAtomic({
@@ -123,6 +133,7 @@ export const addGuestPassEvent = async (req, res) => {
     res.status(400).json({ error: err.message });
   }
 };
+// -------------------------------------------------
 
 // DELETE GUEST (unchanged)
 export const deleteGuest = async (req, res) => {

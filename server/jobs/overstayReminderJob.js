@@ -1,6 +1,7 @@
 import Visitor from "../models/Visitor.js";
-import Guest from "../models/Guest.js";
 import AdhocVisitor from "../models/Adhoc.js";
+// -----------------changed by rebanta--------------
+// Added daily pass return alert sender alongside the existing overstay reminder email
 import { sendDailyPassReturnAlertEmail, sendOverstayEmailToHost } from "../email/emailservice.js";
 import {
   formatPassTimestamp,
@@ -11,7 +12,11 @@ import {
   isPassTrackingDay,
   markPassReturnAlertSent,
 } from "../utils/passTracking.js";
+// -------------------------------------------------
 
+// -----------------changed by rebanta--------------
+// New daily-pass alert scheduling helpers: configurable IST trigger hour plus formatter/
+// helper functions used to decide when same-day pass return reminder emails should fire
 const PASS_RETURN_ALERT_HOUR_IST = Number(process.env.PASS_RETURN_ALERT_HOUR_IST || 20);
 
 const hourFormatter = new Intl.DateTimeFormat("en-IN", {
@@ -68,17 +73,13 @@ async function runDailyPassReturnAlerts(records, type, now) {
     await record.save();
   }
 }
+// -------------------------------------------------
 
 export async function runOverstayReminderJob() {
   try {
     // Only check people who are currently inside
-    const [visitors, guests, adhocs] = await Promise.all([
+    const [visitors, adhocs] = await Promise.all([
       Visitor.find({
-        uiRemoved: { $ne: true },
-        status: "checkedIn",
-        outTime: { $ne: null },
-      }),
-      Guest.find({
         uiRemoved: { $ne: true },
         status: "checkedIn",
         outTime: { $ne: null },
@@ -93,7 +94,6 @@ export async function runOverstayReminderJob() {
     const now = new Date();
 
     await runDailyPassReturnAlerts(visitors, "visitor", now);
-    await runDailyPassReturnAlerts(guests, "guest", now);
 
     // VISITORS
     for (const v of visitors) {
@@ -148,7 +148,7 @@ export async function runOverstayReminderJob() {
     }
 
     console.log(
-      `✅ Overstay reminder job complete. Checked Visitors=${visitors.length}, Guests=${guests.length}, Adhoc=${adhocs.length}`
+      `✅ Overstay reminder job complete. Checked Visitors=${visitors.length}, Adhoc=${adhocs.length}`
     );
   } catch (err) {
     console.error("❌ Overstay reminder job failed:", err.message);

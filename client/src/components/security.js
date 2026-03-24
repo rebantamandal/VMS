@@ -84,6 +84,9 @@ const formatIST = (dateValue) => {
   });
 };
 
+// -----------------changed by rebanta--------------
+// New pass tracking utilities: IST-aware date key formatters, daily pass event accessors,
+// multi-day visit detection, per-card pass action state machine, and UI tone/label helpers
 const PASS_TRACKING_TIME_ZONE = "Asia/Kolkata";
 
 const passDateKeyFormatter = new Intl.DateTimeFormat("en-CA", {
@@ -137,6 +140,8 @@ const isLongPeriodVisit = (visitor) => {
   return Boolean(startDateKey && finalOutDateKey && startDateKey < finalOutDateKey);
 };
 
+const isVisitorRecord = (visitor) => visitor?.source === "visitor";
+
 const isRepeatedVisitorType = (visitor) => visitor?.source !== "adhoc" && isLongPeriodVisit(visitor);
 
 const isFinalCheckoutDay = (visitor, now = new Date()) => {
@@ -164,19 +169,27 @@ const getPassTrackingMeta = (visitor, now = new Date()) => {
   const todayEvents = getDailyPassEvents(visitor).filter((event) => event?.dateKey === todayKey);
   const issueToday = todayEvents.find((event) => event?.action === "issued");
   const returnToday = todayEvents.find((event) => event?.action === "returned");
-  const alertSentToday = Array.isArray(visitor?.dailyPassAlertDates) && visitor.dailyPassAlertDates.includes(todayKey);
+  const alertSentToday =
+    isVisitorRecord(visitor) &&
+    Array.isArray(visitor?.dailyPassAlertDates) &&
+    visitor.dailyPassAlertDates.includes(todayKey);
   const isFinalDay = Boolean(todayKey && finalOutDateKey && todayKey === finalOutDateKey);
   const trackingActive =
     visitor?.status === "checkedIn" &&
     Boolean(todayKey && finalOutDateKey && todayKey <= finalOutDateKey);
 
   if (visitor?.status !== "checkedIn") {
+    const isCheckedOut = visitor?.status === "checkedOut";
     return {
       enabled: true,
       canIssue: false,
       canReturn: false,
       tone: "secondary",
-      summary: "Long-period visit record",
+      summary: isCheckedOut
+        ? "Visit completed and checked out."
+        : "Long-period visit record",
+      todayLabel: isCheckedOut ? "Checked Out" : "Not Active",
+      nextIssueLabel: isCheckedOut ? "No action required" : "Check in to start daily pass flow",
       issueToday,
       returnToday,
     };
@@ -190,6 +203,8 @@ const getPassTrackingMeta = (visitor, now = new Date()) => {
       tone: "secondary",
       // Clarifies that pass actions are closed only after the visit window ends.
       summary: "Visit window ended. Complete final Check Out if still pending.",
+      todayLabel: "Past Final Day",
+      nextIssueLabel: "Complete final Check Out",
       issueToday,
       returnToday,
     };
@@ -205,11 +220,12 @@ const getPassTrackingMeta = (visitor, now = new Date()) => {
       canReturn: false,
       tone: "success",
       summary: `Pass returned today at ${formatIST(returnToday.recordedAt)}.`,
+      todayLabel: "Pass Returned",
       nextIssueLabel: isFinalDay
-        ? "Ready for final checkout"
+        ? "Complete final Check Out now"
         : nextIssueAvailable
         ? `${formatDateKeyForIST(tomorrowKey)} (IST)`
-        : "Not applicable (final checkout day)",
+        : "No further pass issue required",
       issueToday,
       returnToday,
     };
@@ -224,7 +240,8 @@ const getPassTrackingMeta = (visitor, now = new Date()) => {
       summary: alertSentToday
         ? `Alert sent. Today's pass was issued at ${formatIST(issueToday.recordedAt)} and is still pending return.`
         : `Pass issued today at ${formatIST(issueToday.recordedAt)}. Awaiting return${isFinalDay ? " before checkout" : ""}.`,
-      nextIssueLabel: isFinalDay ? "Return pass, then complete final checkout" : "After pass return is recorded",
+      todayLabel: isFinalDay ? "Issued, Return Required Today" : "Issued, Awaiting Return",
+      nextIssueLabel: isFinalDay ? "Return pass, then complete Check Out" : "Record pass return after collection",
       issueToday,
       returnToday,
     };
@@ -240,7 +257,16 @@ const getPassTrackingMeta = (visitor, now = new Date()) => {
         ? "Final day: issue today's pass, then return it and complete checkout."
         : "Ready to issue today's pass."
       : "Pass tracking becomes active only while the visitor is checked in during the visit window.",
-      nextIssueLabel: trackingActive ? `${formatDateKeyForIST(todayKey)} (IST)` : "",
+    todayLabel: trackingActive
+      ? isFinalDay
+        ? "Final Day - Not Issued"
+        : "Not Issued"
+      : "Not Active",
+    nextIssueLabel: trackingActive
+      ? isFinalDay
+        ? "Issue today's pass"
+        : `${formatDateKeyForIST(todayKey)} (IST)`
+      : "Check in to start daily pass flow",
     issueToday,
     returnToday,
   };
@@ -272,6 +298,7 @@ const getPassStatusLabel = (meta) => {
 
 const getPassTodayLabel = (meta) => {
   if (!meta?.enabled) return "Not Applicable";
+  if (meta.todayLabel) return meta.todayLabel;
   if (meta.returnToday) return "Issued + Returned";
   if (meta.issueToday) return "Issued, Awaiting Return";
   return "Not Issued";
@@ -296,6 +323,7 @@ const isPassActionBusyForVisitor = (visitorId, passActionKey) => {
   // Prevents duplicate pass clicks across card and details modal for the same record.
   return Boolean(visitorId && passActionKey && passActionKey.startsWith(`${visitorId}:`));
 };
+// -------------------------------------------------
 
 // ✅ NEW: check if current time > tentative inTime + 24 hours
 const isOverdue24Hours = (v) => {
@@ -327,7 +355,10 @@ export default function Security() {
   const [showConsent, setShowConsent] = useState(false);
   const [showCheckout, setShowCheckout] = useState(false);
   const [showBadgeEdit, setShowBadgeEdit] = useState(false);
+  // -----------------changed by rebanta--------------
+  // New: tracks in-flight pass action key to disable duplicate button clicks
   const [passActionKey, setPassActionKey] = useState("");
+  // -------------------------------------------------
   const [currentVisitor, setCurrentVisitor] = useState(null);
   const [badgeEditVisitor, setBadgeEditVisitor] = useState(null);
   const [badgeNo, setBadgeNo] = useState("");
@@ -371,11 +402,14 @@ export default function Security() {
     return () => clearInterval(interval);
   }, []);
   // ✅ NEW: trigger rerender so overdue button appears when time passes
+  // -----------------changed by rebanta--------------
+  // Shortened tick interval from 30 s to 5 s so pass-day-boundary and overdue states update promptly
   useEffect(() => {
   // Refreshes time-based pass state frequently enough to avoid day-boundary confusion around midnight.
   const t = setInterval(() => setNowTick(Date.now()), 5000);
   return () => clearInterval(t);
 }, []);
+  // -------------------------------------------------
 
 
   useEffect(() => {
@@ -564,6 +598,9 @@ export default function Security() {
     }
   };
 
+  // -----------------changed by rebanta--------------
+  // New: records daily pass issue/return events to backend; syncs details modal record state;
+  // handles already-recorded responses gracefully without surfacing errors to the user
   const recordDailyPassEvent = async (visitor, action) => {
     if (!visitor?._id || visitor.source === "adhoc") return;
 
@@ -585,7 +622,7 @@ export default function Security() {
       const responseBody = response.data || {};
       const updatedRecord = responseBody.guest || responseBody.visitor || responseBody;
       if (detailsVisitor?._id === visitor._id && updatedRecord?._id) {
-        setDetailsVisitor(updatedRecord);
+        setDetailsVisitor({ ...updatedRecord, source: visitor.source });
       }
 
       await fetchVisitors();
@@ -617,6 +654,7 @@ export default function Security() {
       setPassActionKey("");
     }
   };
+  // -------------------------------------------------
 
   // ✅ NEW: Remove visitor from UI for ALL users (end-to-end)
 // Calls backend: PUT /api/{visitors|guests|adhoc}/:id/remove-ui
@@ -868,6 +906,8 @@ const getExpiryDate = () => {
   };
   //-----------------------Changes by Anup----------------------------------------------------------------------------------------------------
 
+  // -----------------changed by rebanta--------------
+  // New: keeps the details modal record in sync after each 5 s background fetch refresh
   useEffect(() => {
     // Keeps the open details modal in sync with the latest fetched record state.
     if (!showDetails || !detailsVisitor?._id) return;
@@ -880,6 +920,7 @@ const getExpiryDate = () => {
       setDetailsVisitor(refreshedDetailsVisitor);
     }
   }, [visitors, showDetails, detailsVisitor]);
+  // -------------------------------------------------
 
   const isGuestSource = (src) => src === "guest";
 
@@ -893,6 +934,9 @@ const getConsentLabel = (v) => {
   return isGuestSource(v.source) ? "Guest's Consent:" : "Visitor's Consent:";
 };
 
+  // -----------------changed by rebanta--------------
+  // New: derived pass-tracking state for the active details modal — computed once per render
+  // so card and modal actions stay in sync without redundant utility calls
   // Reuses the same derived details state across the modal instead of recomputing it inline.
   const detailsNow = detailsVisitor ? new Date(nowTick) : null;
   const detailsPassMeta = detailsVisitor ? getPassTrackingMeta(detailsVisitor, detailsNow) : null;
@@ -907,6 +951,7 @@ const getConsentLabel = (v) => {
     : false;
   const requirePassFlowBeforeFinalCheckout =
     detailsIsRepeated && detailsIsFinalDay && !detailsPassMeta?.returnToday;
+  // -------------------------------------------------
 
 
   const exportToExcel = () => {
@@ -1301,12 +1346,15 @@ const getConsentLabel = (v) => {
           >
             Checked Out ({countVisitors.filter((v) => v.status === "checkedOut").length})
           </button>
+          {/* -----------------changed by rebanta-------------- */}
+          {/* New filter tab: "Repeated" — shows only multi-day visitors/guests via isRepeatedVisitorType */}
           <button
             className={`btn btn-sm rounded-pill px-4 ${statusFilter === "repeated" ? "btn-info" : "btn-outline-info"}`}
             onClick={() => setStatusFilter("repeated")}
           >
             Repeated ({countVisitors.filter((v) => isRepeatedVisitorType(v)).length})
           </button>
+          {/* ------------------------------------------------- */}
           {/* info icon with tooltip explaining 7-day filter */}
           <span
             title="Only records checked out within the last 7 days are shown on screen. For older records, use Export to Excel."
@@ -1327,6 +1375,9 @@ const getConsentLabel = (v) => {
                 </p>
               </div>
             ) : (
+              // -----------------changed by rebanta--------------
+              // Refactored map to block body: per-card pass-tracking state derived from shared
+              // nowTick so all date-sensitive UI (chips, buttons, panels) refresh together
               filteredVisitors.map((v, i) => {
                 // Uses the shared time tick so date-based actions update consistently in the UI.
                 const guardNow = new Date(nowTick);
@@ -1343,6 +1394,7 @@ const getConsentLabel = (v) => {
                 const showOnlyCheckout =
                   (isFinalDayRepeated && Boolean(passTracking.returnToday)) ||
                   isAfterFinalDayRepeated;
+                // -------------------------------------------------
 
                 return (
                 <motion.div
@@ -1378,11 +1430,14 @@ const getConsentLabel = (v) => {
                       <FaUser className="me-2" />
                       {v.firstName} {v.lastName}
                     </h4>
+                    {/* -----------------changed by rebanta-------------- */}
+                    {/* New: badge chip identifying multi-day visitors and guests on the card */}
                     {isRepeatedRecord && (
                       <div className="text-center mb-2">
                         <span className="repeated-visit-chip">Repeated Visitor/Guest</span>
                       </div>
                     )}
+                    {/* ------------------------------------------------- */}
                     <p>
                       <FaBuilding className="me-2" />
                       <b>Category: {v.category || "-"}</b> 
@@ -1420,6 +1475,9 @@ const getConsentLabel = (v) => {
                       <b>Status:</b> <span className="badge bg-dark rounded-pill px-3">{v.status?.toUpperCase()}</span>
                     </p>
 
+                    {/* -----------------changed by rebanta-------------- */}
+                    {/* New: per-card daily pass tracking panel — status chip, summary text,
+                        today's pass label, next-issue date, and visit window for multi-day records */}
                     {passTracking.enabled && (
                       <div className="pass-panel rounded-3 p-3 mb-3" style={passStatusStyles}>
                         <div className="pass-panel-header mb-2">
@@ -1446,6 +1504,7 @@ const getConsentLabel = (v) => {
                         </div>
                       </div>
                     )}
+                    {/* ------------------------------------------------- */}
 
                     {v.displaySignature && (
                       <div className="text-center my-2">
@@ -1479,6 +1538,9 @@ const getConsentLabel = (v) => {
 )}
 
 
+                    {/* -----------------changed by rebanta-------------- */}
+                    {/* Redesigned: repeated visitors get Issue/Return Pass + showOnlyCheckout guard;
+                        non-repeated get Edit Badge, optional Issue/Return Pass, Print, View Details, Check Out */}
                     {v.status === "checkedIn" && (
                       <div className="d-flex justify-content-center gap-2 mt-3 flex-wrap action-row-modern">
                         {isRepeatedRecord ? (
@@ -1567,6 +1629,7 @@ const getConsentLabel = (v) => {
                         )}
                       </div>
                     )}
+                    {/* ------------------------------------------------- */}
                   </div>
                 </motion.div>
                 );
@@ -1963,6 +2026,9 @@ const getConsentLabel = (v) => {
                     {detailsVisitor.guestWifiRequired ? "Yes" : "No"}
                   </div>
 
+                  {/* -----------------changed by rebanta-------------- */}
+                  {/* New: collapsible daily pass history section — lists all issue/return
+                      events in reverse chronological order for repeated visitor records */}
                   {detailsVisitor.source !== "adhoc" && isLongPeriodVisit(detailsVisitor) && (
                     <div className="col-12 mt-3">
                       <div className="border rounded-3 p-3" style={{ background: "#f8f9fa" }}>
@@ -1988,11 +2054,15 @@ const getConsentLabel = (v) => {
                       </div>
                     </div>
                   )}
+                  {/* ------------------------------------------------- */}
 
 
                   
                 </div>
 
+                {/* -----------------changed by rebanta-------------- */}
+                {/* Redesigned details modal footer: Issue Pass, Return Pass, Optional/Final
+                    Check Out (blocked until pass returned on final day), and Close button */}
                 <div className="text-center mt-4 d-flex justify-content-center gap-2 flex-wrap">
                   {detailsVisitor.status === "checkedIn" && (
                     <>
@@ -2041,6 +2111,7 @@ const getConsentLabel = (v) => {
                     Close
                   </button>
                 </div>
+                {/* ------------------------------------------------- */}
 
               </div>
             </div>
@@ -2061,6 +2132,10 @@ const getConsentLabel = (v) => {
           transform: translateY(-8px);
           box-shadow: 0 14px 28px rgba(0, 0, 0, 0.3);
         }
+        /* -----------------changed by rebanta-------------- */
+        /* New CSS: repeated-visit-chip badge, pass panel (pass-panel, pass-panel-header,
+           pass-summary-text, pass-status-chip variants), pass-mini-grid card layout,
+           action-row-modern divider, and pass-action-btn — all for the daily pass feature */
         .repeated-visit-chip {
           display: inline-block;
           font-size: 0.74rem;
@@ -2153,6 +2228,7 @@ const getConsentLabel = (v) => {
             grid-template-columns: repeat(2, 1fr);
           }
         }
+        /* ------------------------------------------------- */
         .consent-text {
           font-size: 14px;
           line-height: 1.6;

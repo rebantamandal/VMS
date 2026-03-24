@@ -1,13 +1,19 @@
+// -----------------changed by rebanta--------------
+// Added useRef import to support guestsRef snapshot and idempotency guard refs
 import React, { useState, useEffect, useRef } from "react";
+// -------------------------------------------------
 import { motion, AnimatePresence } from "framer-motion";
-import { FaUser, FaWifi } from "react-icons/fa";
+import { FaUser, FaWifi, FaInfoCircle } from "react-icons/fa";
 import { useMsal } from "@azure/msal-react";
 import axios from "axios";
 import Swal from "sweetalert2";
 //--------------------------changed by rebanta------------------------------//
 import { validatePhoneLength } from "../utils/phoneUtils";
 import duplicateIcon from "../images/duplicate.png";
+// -----------------changed by rebanta--------------
+// Added BulkUploadModal import for Excel-based batch guest import feature
 import BulkUploadModal from "./BulkUploadModal";
+// -------------------------------------------------
 //--------------------------changed by rebanta------------------------------//
 
 const MAX_GUESTS = 10;
@@ -29,6 +35,9 @@ const PHONE_HINTS = {
    "+46": "7–9 digits",
 };
 
+// -----------------changed by rebanta--------------
+// Moved COUNTRY_CODES to module scope (was inside component) so it can be
+// referenced by splitPhoneByCountryCode without a dependency on the component instance
 const COUNTRY_CODES = [
   { code: "+91", label: "India (+91)" },
   { code: "+81", label: "Japan (+81)" },
@@ -44,6 +53,7 @@ const COUNTRY_CODES = [
   { code: "+61", label: "Australia (+61)" },
   { code: "+46", label: "Sweden (+46)" },
 ];
+// -------------------------------------------------
 
 // Flag emoji per country code
 const COUNTRY_FLAGS = {
@@ -72,6 +82,10 @@ const isCardFilled = (g) =>
   g.TentativeinTime &&
   g.TentativeoutTime;
 
+// -----------------changed by rebanta--------------
+// New helpers: hasGuestCoreFields checks if any meaningful data exists (used to detect
+// pre-filled batches); buildGuestSeedSignature / buildGuestBatchSignature produce
+// stable JSON keys used to deduplicate repeat-seed effect runs
 const hasGuestCoreFields = (item) =>
   item.firstName || item.lastName || item.email || item.company || item.phone || item.purposeOfVisit;
 
@@ -100,7 +114,11 @@ const buildGuestBatchSignature = (batch) =>
       TentativeoutTime: seed?.TentativeoutTime || seed?.outTime || "",
     }))
   );
+// -------------------------------------------------
 
+// -----------------changed by rebanta--------------
+// New: splitPhoneByCountryCode robustly extracts country code + local number,
+// replacing the previous single-regex approach that failed for some country codes
 const splitPhoneByCountryCode = (rawPhone, explicitCountryCode, codeOptions) => {
   const raw = String(rawPhone || "").trim();
   const digits = raw.replace(/\D/g, "");
@@ -126,8 +144,14 @@ const splitPhoneByCountryCode = (rawPhone, explicitCountryCode, codeOptions) => 
 
   return { countryCode: "+91", phone: digits };
 };
+// -------------------------------------------------
 
-export default function GuestForm({ isMobile, setActiveForm, guestToEdit, repeatSeed, repeatBatch, onRepeatSeedConsumed }) {
+export default function GuestForm({ isMobile, setActiveForm, guestToEdit,
+// -----------------changed by rebanta--------------
+// Added repeatSeed, repeatBatch, onRepeatSeedConsumed props for the repeat-guest
+// prefill flow; Array.isArray guard added to accounts to prevent crashes with undefined
+ repeatSeed, repeatBatch, onRepeatSeedConsumed }) {
+// -------------------------------------------------
   const { accounts } = useMsal();
 
   const currentAccount = Array.isArray(accounts) ? accounts[0] : null;
@@ -172,6 +196,10 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit, repeat
   const [openIndex, setOpenIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const [autofillStates, setAutofillStates] = useState({});
+  // -----------------changed by rebanta--------------
+  // New state/refs: showBulkUpload controls the Import-from-Excel modal;
+  // guestsRef mirrors state for read-only access inside effects without stale closures;
+  // processedRepeatSeedRef / processedRepeatBatchRef prevent duplicate seed effect runs
   const [showBulkUpload, setShowBulkUpload] = useState(false);
   const guestsRef = useRef(guests);
   const processedRepeatSeedRef = useRef("");
@@ -180,6 +208,7 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit, repeat
   useEffect(() => {
     guestsRef.current = guests;
   }, [guests]);
+  // -------------------------------------------------
 
   const getNowLocal = () => {
     const now = new Date();
@@ -211,9 +240,12 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit, repeat
   useEffect(() => {
     if (!guestToEdit) return;
 
+    // -----------------changed by rebanta--------------
+    // Replaced manual regex phone split with splitPhoneByCountryCode for robustness
     const phoneParts = splitPhoneByCountryCode(guestToEdit.phone, guestToEdit.countryCode, COUNTRY_CODES);
     const parsedCountryCode = phoneParts.countryCode;
     const parsedPhone = phoneParts.phone;
+    // -------------------------------------------------
 
     setGuests([{
       category: guestToEdit.category || "Isuzu Employee",
@@ -243,6 +275,9 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit, repeat
     setOpenIndex(0);
   }, [guestToEdit, ssoEmail, ssoHostName]);
 
+  // -----------------changed by rebanta--------------
+  // New: repeatSeed effect — prefills a single guest card from a previously submitted
+  // record; idempotency guard prevents double-application on re-renders
   useEffect(() => {
     if (!repeatSeed || guestToEdit) return;
 
@@ -292,7 +327,11 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit, repeat
     setAutofillStates({});
     if (typeof onRepeatSeedConsumed === "function") onRepeatSeedConsumed();
   }, [repeatSeed, guestToEdit, ssoEmail, ssoHostName, onRepeatSeedConsumed]);
+  // -------------------------------------------------
 
+  // -----------------changed by rebanta--------------
+  // New: repeatBatch effect — prefills multiple guest cards from a history batch;
+  // idempotency guard and slot-limit warning prevent duplicate cards and overflow
   useEffect(() => {
     if (!repeatBatch || guestToEdit || !Array.isArray(repeatBatch) || repeatBatch.length === 0) return;
 
@@ -358,6 +397,7 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit, repeat
 
     if (typeof onRepeatSeedConsumed === "function") onRepeatSeedConsumed();
   }, [repeatBatch, guestToEdit, ssoEmail, ssoHostName, onRepeatSeedConsumed]);
+  // -------------------------------------------------
 
   const handleChange = (index, field, value) => {
     setGuests((prev) =>
@@ -550,6 +590,9 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit, repeat
       transition={{ duration: 0.5 }}
     >
       <div className="d-flex justify-content-between align-items-center mb-4">
+        {/* -----------------changed by rebanta-------------- */}
+        {/* Replaced plain <h3> with flex header row; added "Import from Excel" button
+            that opens BulkUploadModal for batch guest import via Excel spreadsheet */}
         <h3 className="fw-bold text-center mb-0">
           {guestToEdit ? "Edit Guest" : "Guest Details"}
         </h3>
@@ -557,12 +600,13 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit, repeat
           <button
             type="button"
             className="btn btn-outline-dark btn-sm"
-            title="Bulk upload guests from an Excel file"
+            title="Import guests from an Excel file"
             onClick={() => setShowBulkUpload(true)}
           >
-            Bulk Upload
+            Import from Excel
           </button>
         )}
+        {/* ------------------------------------------------- */}
       </div>
 
       <form onSubmit={handleSubmit} className="d-flex flex-column gap-3">
@@ -843,7 +887,16 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit, repeat
                   )}
 
                   {/* Tentative In Time */}
-                  <label className="fw-bold mt-3">Tentative In Time</label>
+                  <label className="fw-bold mt-3 d-flex align-items-center gap-2">
+                    <span>Tentative In Time</span>
+                    <span
+                      title="If Tentative Out is more than 24 hours after Tentative In, this entry is treated as repeated and daily pass tracking rules apply."
+                      style={{ cursor: "pointer", color: "#6b7280", fontSize: "0.9rem", lineHeight: 1 }}
+                      aria-label="Repeated visit rule"
+                    >
+                      <FaInfoCircle />
+                    </span>
+                  </label>
                   <div className="d-flex gap-2 align-items-center">
                     <input
                       type="datetime-local"
@@ -911,6 +964,9 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit, repeat
         .wifi-toggle.active .toggle-circle { transform: translateX(24px); }
       `}</style>
 
+      {/* -----------------changed by rebanta-------------- */}
+      {/* New: BulkUploadModal renders outside the form; type="guest" targets guest API;
+          accepts hostName and submittedBy from SSO state; controlled by showBulkUpload */}
       <BulkUploadModal
         show={showBulkUpload}
         type="guest"
@@ -918,6 +974,7 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit, repeat
         submittedBy={ssoEmail}
         onClose={() => setShowBulkUpload(false)}
       />
+      {/* ------------------------------------------------- */}
     </motion.div>
   );
 }

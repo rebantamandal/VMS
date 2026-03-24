@@ -47,6 +47,16 @@ const buildPersonKey = (row) => {
   return `${source}|fallback|${normalize(row._id)}|${first}|${last}|${normalize(row.createdAt)}`;
 };
 
+const getInitials = (fullName) => {
+  const tokens = String(fullName || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!tokens.length) return "NA";
+  if (tokens.length === 1) return tokens[0].slice(0, 2).toUpperCase();
+  return `${tokens[0][0] || ""}${tokens[tokens.length - 1][0] || ""}`.toUpperCase();
+};
+
 export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, onRepeatMultiSelect }) {
   const { accounts } = useMsal();
   const [historyRows, setHistoryRows] = useState([]);
@@ -426,29 +436,32 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.2 }}
+          transition={{ duration: 0.24 }}
           className="position-fixed top-0 start-0 w-100 h-100"
           style={{ background: "rgba(15, 23, 42, 0.6)", zIndex: 1040, backdropFilter: "blur(3px)" }}
           onClick={onClose}
         >
           <motion.div
-            initial={{ opacity: 0, y: 28, scale: 0.97 }}
+            initial={{ opacity: 0, y: 24, scale: 0.985 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 20, scale: 0.97 }}
-            transition={{ duration: 0.22 }}
+            exit={{ opacity: 0, y: 16, scale: 0.985 }}
+            transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
             className="position-absolute top-50 start-50 translate-middle bg-white rounded-4 shadow-lg d-flex flex-column"
-            style={{ width: "min(94vw, 860px)", maxHeight: "88vh", borderRadius: "18px", overflow: "hidden", fontFamily: "Arial, sans-serif" }}
+            style={{ width: "min(94vw, 860px)", maxHeight: "88vh", borderRadius: "18px", overflow: "hidden", border: "1px solid #e2e8f0", fontFamily: "'Segoe UI', 'Calibri', 'Helvetica Neue', sans-serif" }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* ── Header ── */}
-            <div className="px-4 py-3" style={{ background: "#fff8dc", boxShadow: "0 4px 12px rgba(216, 178, 0, 0.14)", borderBottom: "3px solid #D8B200" }}>
+            <div className="px-3 py-3" style={{ background: "linear-gradient(135deg, #0f172a 0%, #1e293b 58%, #334155 100%)", borderBottom: "2px solid #D8B200" }}>
               <div className="d-flex align-items-start justify-content-between gap-3">
                 <div>
-                  <h5 className="mb-1 fw-bold d-flex align-items-center gap-2" style={{ color: "#5f4b00", fontSize: "1.4rem", letterSpacing: "0.3px", fontWeight: "700" }}>
-                    <FaLayerGroup style={{ fontSize: "1.5rem" }} />
-                    Previous Visitors &amp; Guests
+                  <h5 className="mb-0 fw-bold d-flex align-items-center gap-2" style={{ color: "#f8fafc", fontSize: "1.2rem", letterSpacing: "0.2px", fontWeight: "700" }}>
+                    <FaLayerGroup style={{ fontSize: "1.35rem", color: "#fbbf24" }} />
+                    Visitor &amp; Guest History
                   </h5>
-                  <div className="d-flex align-items-center gap-2 flex-wrap mt-2">
+                  <p className="mb-1" style={{ color: "#cbd5e1", fontSize: "0.84rem", fontWeight: "500" }}>
+                    Review past records, repeat registrations quickly, and export visit details.
+                  </p>
+                  <div className="d-flex align-items-center gap-2 flex-wrap mt-1">
                     {visitorCount > 0 && (
                       <span className="badge rounded-pill d-inline-flex align-items-center gap-1"
                         style={{ ...SOURCE_STYLE.visitor.badge, fontSize: "0.88rem", padding: "7px 12px", boxShadow: "0 2px 8px rgba(216, 178, 0, 0.16)", fontWeight: "600" }}>
@@ -462,23 +475,23 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
                       </span>
                     )}
                     {isUnknownIdentity && (
-                      <span className="rounded-pill d-inline-flex align-items-center" style={{ background: "#fff8dc", color: "#6b5600", border: "1px solid #efdca0", fontSize: "0.88rem", padding: "7px 12px", fontWeight: "600" }}>
+                      <span className="rounded-pill d-inline-flex align-items-center" style={{ background: "rgba(248,250,252,0.14)", color: "#e2e8f0", border: "1px solid rgba(226,232,240,0.4)", fontSize: "0.88rem", padding: "7px 12px", fontWeight: "600" }}>
                         Showing all (local / not signed in)
                       </span>
                     )}
                   </div>
                 </div>
-                <button type="button" className="btn btn-outline-danger btn-sm flex-shrink-0" onClick={onClose}
+                <button type="button" className="btn btn-sm flex-shrink-0" onClick={onClose}
                   title="Close" style={{ height: "38px", width: "38px", padding: 0, borderRadius: "50%" }}>
-                  <FaTimes size={14} />
+                  <FaTimes size={14} color="#f8fafc" />
                 </button>
               </div>
             </div>
 
             {/* ── Toolbar ── */}
-            <div className="px-4 pt-3 pb-3" style={{ background: "#f8f9fa", borderBottom: "1px solid #dee2e6" }}>
+            <div className="px-3 pt-2 pb-2" style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
               {/* Search + multi-select tools */}
-              <div className="d-flex align-items-center flex-wrap gap-3 mb-3">
+              <div className="d-flex align-items-center flex-wrap gap-2 mb-2">
                 <div className="input-group flex-grow-1" style={{ minWidth: "280px", height: CONTROL_HEIGHT, borderRadius: "8px", overflow: "hidden" }}>
                   <span className="input-group-text" style={{ height: CONTROL_HEIGHT, background: "#fff", color: "#6b7280", border: "1px solid #dee2e6", borderRight: "none" }}>
                     <FaSearch size={13} />
@@ -557,7 +570,7 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
 
               {/* Type-lock hint */}
               {selectMultipleMode && selectionScopeSource && (
-                <div className="rounded-3 px-3 py-2 d-flex align-items-center gap-2 mt-2" style={{ background: SOURCE_STYLE[selectionScopeSource]?.badge?.background || "#f1f5f9", border: `1.5px solid ${SOURCE_STYLE[selectionScopeSource]?.border || "#dee2e6"}`, fontSize: "0.82rem" }}>
+                <div className="rounded-3 px-2 py-1 d-flex align-items-center gap-2 mt-1" style={{ background: SOURCE_STYLE[selectionScopeSource]?.badge?.background || "#f1f5f9", border: `1.5px solid ${SOURCE_STYLE[selectionScopeSource]?.border || "#dee2e6"}`, fontSize: "0.8rem" }}>
                   <span style={{ color: SOURCE_STYLE[selectionScopeSource]?.badge?.color, fontSize: "1rem" }}>
                     {selectionScopeSource === "visitor" ? <FaUserTie /> : <FaUserFriends />}
                   </span>
@@ -572,7 +585,7 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
             </div>
 
             {/* ── List ── */}
-            <div className="flex-grow-1 p-3" style={{ overflowY: "auto", background: "#fff" }}>
+            <div className="flex-grow-1 p-2" style={{ overflowY: "auto", background: "#fff" }}>
               {loading && (
                 <div className="text-center py-6 text-muted">
                   <div className="spinner-border spinner-border-sm me-2" style={{ color: "#b88600" }} />
@@ -595,7 +608,7 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
               )}
 
               {!loading && filteredRows.length > 0 && (
-                <div className="d-flex flex-column gap-3">
+                <div className="d-flex flex-column gap-2">
                   {filteredRows.map((row) => {
                     const key = row.personKey || `${row.source}-${row._id}`;
                     const isSelected = Boolean(selectedRows[key]);
@@ -612,16 +625,17 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
                         key={key}
                         className="border rounded-3"
                         style={{
-                          borderLeft: `6px solid ${srcStyle.border}`,
-                          boxShadow: isSelected ? `0 0 0 2px ${srcStyle.border}, 0 8px 16px rgba(216, 178, 0, 0.18)` : "0 2px 8px rgba(0,0,0,0.06)",
+                          borderLeft: `4px solid ${srcStyle.border}`,
+                          borderColor: "#e2e8f0",
+                          boxShadow: isSelected ? `0 0 0 2px ${srcStyle.border}55, 0 8px 16px rgba(15, 23, 42, 0.1)` : "0 1px 4px rgba(15,23,42,0.08)",
                           transition: "all 0.2s",
-                          background: isSelected ? srcStyle.badge.background : "#fff",
+                          background: "#fff",
                           cursor: selectMultipleMode ? "pointer" : "default",
                         }}
-                        onMouseEnter={(e) => { if (!selectMultipleMode) e.currentTarget.style.boxShadow = "0 4px 12px rgba(216, 178, 0, 0.16)"; }}
-                        onMouseLeave={(e) => { if (!selectMultipleMode) e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.06)"; }}
+                        onMouseEnter={(e) => { if (!selectMultipleMode) e.currentTarget.style.boxShadow = "0 6px 14px rgba(15,23,42,0.12)"; }}
+                        onMouseLeave={(e) => { if (!selectMultipleMode) e.currentTarget.style.boxShadow = isSelected ? `0 0 0 2px ${srcStyle.border}55, 0 8px 16px rgba(15, 23, 42, 0.1)` : "0 1px 4px rgba(15,23,42,0.08)"; }}
                       >
-                        <div className="p-3">
+                        <div className="p-2">
                           <div className="d-flex align-items-start gap-3">
                             {/* Checkbox (only shown in multi-select and type matches) */}
                             {selectMultipleMode && (
@@ -637,12 +651,29 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
                               </div>
                             )}
 
+                            <div
+                              className="d-flex align-items-center justify-content-center rounded-circle flex-shrink-0"
+                              style={{
+                                width: "42px",
+                                height: "42px",
+                                background: row.source === "guest" ? "#fff2e0" : "#fff8dc",
+                                border: row.source === "guest" ? "1px solid #f2d2a6" : "1px solid #efdca0",
+                                color: row.source === "guest" ? "#7a4a00" : "#6b5600",
+                                fontSize: "0.78rem",
+                                fontWeight: "700",
+                                letterSpacing: "0.04em",
+                              }}
+                              title={row.fullName || "Unnamed"}
+                            >
+                              {getInitials(row.fullName)}
+                            </div>
+
                             {/* Content */}
                             <div className="flex-grow-1 min-width-0">
                               {/* Name + badges row */}
-                              <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-1">
+                              <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-0">
                                 <div className="d-flex align-items-center gap-2 flex-wrap">
-                                  <h6 className="mb-0 fw-bold" style={{ fontSize: "1.15rem", color: "#1e293b", fontWeight: "700" }}>
+                                  <h6 className="mb-0 fw-bold" style={{ fontSize: "1.05rem", color: "#1e293b", fontWeight: "700" }}>
                                     {row.fullName || "Unnamed"}
                                   </h6>
                                   <span className="badge rounded-pill" style={{ ...srcStyle.badge, fontSize: "0.85rem", padding: "6px 12px", boxShadow: `0 2px 6px ${srcStyle.border}30`, fontWeight: "600" }}>
@@ -661,21 +692,21 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
                                       type="button"
                                       className="btn btn-sm d-inline-flex align-items-center gap-1"
                                       style={{
-                                        background: srcStyle.border,
-                                        color: "#fff",
-                                        border: "none",
+                                        background: "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)",
+                                        color: "#f8fafc",
+                                        border: "1px solid #0f172a",
                                         fontSize: CONTROL_FONT,
                                         minWidth: "130px",
                                         height: CONTROL_HEIGHT,
                                         padding: CONTROL_PADDING,
                                         borderRadius: "8px",
-                                        fontWeight: "500",
+                                        fontWeight: "600",
                                         cursor: "pointer",
-                                        boxShadow: `0 4px 12px ${srcStyle.border}40`,
+                                        boxShadow: "0 4px 12px rgba(15,23,42,0.2)",
                                         transition: "all 0.2s",
                                       }}
-                                      onMouseEnter={(e) => { e.currentTarget.style.boxShadow = `0 6px 16px ${srcStyle.border}60`; e.currentTarget.style.transform = "translateY(-2px)"; }}
-                                      onMouseLeave={(e) => { e.currentTarget.style.boxShadow = `0 4px 12px ${srcStyle.border}40`; e.currentTarget.style.transform = "translateY(0)"; }}
+                                      onMouseEnter={(e) => { e.currentTarget.style.background = `linear-gradient(135deg, ${srcStyle.border} 0%, #f59e0b 100%)`; e.currentTarget.style.color = "#0f172a"; e.currentTarget.style.boxShadow = `0 8px 18px ${srcStyle.border}55`; e.currentTarget.style.transform = "translateY(-2px)"; }}
+                                      onMouseLeave={(e) => { e.currentTarget.style.background = "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)"; e.currentTarget.style.color = "#f8fafc"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(15,23,42,0.2)"; e.currentTarget.style.transform = "translateY(0)"; }}
                                       onClick={() => openRepeatForm(row)}
                                       title="Open pre-filled form for this person"
                                     >
@@ -692,14 +723,14 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
                                       padding: CONTROL_PADDING,
                                       background: "#fff8dc",
                                       color: "#6b5600",
-                                      border: "1.5px solid #efdca0",
+                                      border: "1.2px solid #efdca0",
                                       borderRadius: "8px",
-                                      fontWeight: "500",
+                                      fontWeight: "600",
                                       cursor: "pointer",
                                       transition: "all 0.2s",
                                     }}
-                                    onMouseEnter={(e) => { e.currentTarget.style.background = "#fff2e0"; e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(216, 178, 0, 0.2)"; }}
-                                    onMouseLeave={(e) => { e.currentTarget.style.background = "#fff8dc"; e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "none"; }}
+                                    onMouseEnter={(e) => { e.currentTarget.style.background = "#fff2e0"; e.currentTarget.style.borderColor = "#f2d2a6"; e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 6px 14px rgba(216,178,0,0.22)"; }}
+                                    onMouseLeave={(e) => { e.currentTarget.style.background = "#fff8dc"; e.currentTarget.style.borderColor = "#efdca0"; e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "none"; }}
                                     onClick={() => exportVisitsForPerson(row)}
                                     title="Export all visit details for this person"
                                   >
@@ -709,7 +740,7 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
                               </div>
 
                               {/* Core info */}
-                              <div className="d-flex flex-wrap gap-3" style={{ fontSize: "0.95rem", color: "#475569", marginTop: "10px", lineHeight: "1.55", fontWeight: "500" }}>
+                              <div className="d-flex flex-wrap gap-2" style={{ fontSize: "0.84rem", color: "#475569", marginTop: "6px", lineHeight: "1.45", fontWeight: "500" }}>
                                 {row.email && (
                                   <span><strong>Email:</strong> {row.email}</span>
                                 )}
@@ -742,7 +773,7 @@ export default function EmployeeProfileModal({ show, onClose, onRepeatSelect, on
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 12 }}
                   transition={{ duration: 0.2 }}
-                  className="px-4 pt-3 pb-2 d-flex flex-column gap-3"
+                  className="px-3 pt-2 pb-2 d-flex flex-column gap-2"
                   style={{ background: "#f8f9fa", borderTop: "2px solid #dee2e6", borderRadius: "0 0 1rem 1rem" }}
                 >
                   {/* Row 1: tentative inputs — full width, only when >1 selected */}

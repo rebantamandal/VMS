@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import Swal from "sweetalert2";
 import * as XLSX from "xlsx";
+import { FaCheckCircle, FaTimes } from "react-icons/fa";
 import { validatePhoneLength, PHONE_RULES } from "../utils/phoneUtils";
 
 // Stricter email regex to match VisitorForm.js
@@ -86,39 +87,39 @@ const GUEST_OPTIONAL_FIELDS = [
 ];
 
 const VISITOR_SAMPLE_ROW = {
-  firstName: "Sample",
-  lastName: "Visitor",
+  firstName: "Sample (ignored row)",
+  lastName: "Visitor (example)",
   email: "sample.visitor@example.com",
-  company: "UD Trucks",
+  company: "Sample Company",
   countryCode: "91", // You can enter '91' or '+91', system will auto-correct
   phone: "9876543210",
-  purposeOfVisit: "Plant tour",
-  host: "Host Name",
-  meetingRoom: "Meeting Room A",
-  laptopSerial: "LPT-12345",
+  purposeOfVisit: "Sample entry only - ignored",
+  host: "Sample Host",
+  meetingRoom: "Sample Meeting Room",
+  laptopSerial: "SAMPLE-IGNORE",
   guestWifiRequired: "true",
-  TentativeinTime: "2026-04-10 10:00",
-  TentativeoutTime: "2026-04-10 12:00",
+  TentativeinTime: "10-04-2026 10:00",
+  TentativeoutTime: "10-04-2026 12:00",
 };
 
 const GUEST_SAMPLE_ROW = {
   category: "Isuzu Employee",
-  firstName: "Sample",
-  lastName: "Guest",
+  firstName: "Sample (ignored row)",
+  lastName: "Guest (example)",
   email: "sample.guest@example.com",
-  company: "UD Trucks",
-  host: "Host Name",
+  company: "Sample Company",
+  host: "Sample Host",
   countryCode: "91", // You can enter '91' or '+91', system will auto-correct
   phone: "9876543210",
-  purposeOfVisit: "Vendor meeting",
+  purposeOfVisit: "Sample entry only - ignored",
   meetingRoomRequired: "true",
-  meetingRoom: "Meeting Room B",
-  laptopSerial: "LPT-98765",
+  meetingRoom: "Sample Meeting Room",
+  laptopSerial: "SAMPLE-IGNORE",
   guestWifiRequired: "true",
   refreshmentRequired: "true",
-  proposedRefreshmentTime: "2026-04-10 11:00",
-  TentativeinTime: "2026-04-10 10:00",
-  TentativeoutTime: "2026-04-10 13:00",
+  proposedRefreshmentTime: "10-04-2026 11:00",
+  TentativeinTime: "10-04-2026 10:00",
+  TentativeoutTime: "10-04-2026 13:00",
 };
 
 const GUEST_CATEGORIES = new Set(["Isuzu Employee", "UD Employee"]);
@@ -180,6 +181,30 @@ const parseExcelDate = (value) => {
     return new Date(parsed.y, parsed.m - 1, parsed.d, parsed.H, parsed.M, parsed.S);
   }
 
+  if (typeof value === "string") {
+    const raw = toText(value);
+    // Strict text format for template input: dd-mm-yyyy HH:mm (or dd/mm/yyyy HH:mm)
+    const dmyMatch = raw.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?:[\sT,]+(\d{1,2}):(\d{2}))?$/);
+    if (dmyMatch) {
+      const day = Number.parseInt(dmyMatch[1], 10);
+      const month = Number.parseInt(dmyMatch[2], 10);
+      const year = Number.parseInt(dmyMatch[3], 10);
+      const hour = dmyMatch[4] ? Number.parseInt(dmyMatch[4], 10) : 0;
+      const minute = dmyMatch[5] ? Number.parseInt(dmyMatch[5], 10) : 0;
+
+      const candidate = new Date(year, month - 1, day, hour, minute, 0, 0);
+      if (
+        !Number.isNaN(candidate.getTime()) &&
+        candidate.getFullYear() === year &&
+        candidate.getMonth() === month - 1 &&
+        candidate.getDate() === day
+      ) {
+        return candidate;
+      }
+      return null;
+    }
+  }
+
   const parsed = new Date(toText(value));
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed;
@@ -201,18 +226,22 @@ const isEmptyRow = (row) =>
   Object.values(row || {}).every((value) => toText(value) === "");
 
 const isVisitorSampleRow = (row) => {
+  const firstName = toText(row.firstname).toLowerCase();
+  const lastName = toText(row.lastname).toLowerCase();
   return (
-    toText(row.firstname).toLowerCase() === "sample" &&
-    toText(row.lastname).toLowerCase() === "visitor" &&
+    firstName.startsWith("sample") &&
+    lastName.startsWith("visitor") &&
     toText(row.email).toLowerCase() === "sample.visitor@example.com" &&
     toText(row.phone) === "9876543210"
   );
 };
 
 const isGuestSampleRow = (row) => {
+  const firstName = toText(row.firstname).toLowerCase();
+  const lastName = toText(row.lastname).toLowerCase();
   return (
-    toText(row.firstname).toLowerCase() === "sample" &&
-    toText(row.lastname).toLowerCase() === "guest" &&
+    firstName.startsWith("sample") &&
+    lastName.startsWith("guest") &&
     toText(row.email).toLowerCase() === "sample.guest@example.com" &&
     toText(row.phone) === "9876543210"
   );
@@ -284,8 +313,10 @@ const buildInstructionRows = (requiredFields, optionalFields, extraRows = []) =>
     ["1. Download template from this popup."],
     ["2. Keep header names unchanged."],
     ["3. Fill real rows below sample row."],
-    ["4. Optional fields can be left blank."],
-    ["5. Submit once all required fields are valid."],
+    ["4. The first data row in the Template sheet is a sample row."],
+    ["5. Do not remove the sample row; it is ignored automatically during upload."],
+    ["6. Optional fields can be left blank."],
+    ["7. Submit once all required fields are valid."],
     [],
     ["Required fields"],
     [requiredFields.join(", ")],
@@ -300,6 +331,14 @@ const buildInstructionRows = (requiredFields, optionalFields, extraRows = []) =>
   }
 
   return rows;
+};
+
+const formatFileSize = (bytes) => {
+  const size = Number(bytes || 0);
+  if (!size || Number.isNaN(size)) return "0 KB";
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(2)} MB`;
 };
 
 const ALLOWED_COUNTRY_CODES = Object.keys(PHONE_RULES);
@@ -542,14 +581,19 @@ export default function BulkUploadModal({
   const [validationErrors, setValidationErrors] = useState([]);
   const [summary, setSummary] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [hasDownloadedTemplate, setHasDownloadedTemplate] = useState(false);
 
   const content = useMemo(() => {
     const isVisitor = type === "visitor";
     const resolvedHostName = toText(hostName) || "Logged-in Host";
     return {
       title: isVisitor ? "Bulk Visitor Upload" : "Bulk Guest Upload",
+      subtitle: isVisitor
+        ? "Import multiple visitors in one go using the Excel template."
+        : "Import multiple guests in one go using the Excel template.",
       endpoint: isVisitor ? "/api/visitors" : "/api/guests",
       entityName: isVisitor ? "visitors" : "guests",
+      entityLabel: isVisitor ? "Visitor" : "Guest",
       headers: isVisitor ? VISITOR_HEADERS : GUEST_HEADERS,
       requiredFields: isVisitor ? VISITOR_REQUIRED_FIELDS : GUEST_REQUIRED_FIELDS,
       optionalFields: isVisitor ? VISITOR_OPTIONAL_FIELDS : GUEST_OPTIONAL_FIELDS,
@@ -558,33 +602,48 @@ export default function BulkUploadModal({
         : { ...GUEST_SAMPLE_ROW, host: resolvedHostName },
       instructionRows: isVisitor
         ? buildInstructionRows(VISITOR_REQUIRED_FIELDS, VISITOR_OPTIONAL_FIELDS, [
-            "Use readable date/time format, for example: 2026-04-10 10:00.",
+            "Use date/time format dd-mm-yyyy HH:mm, for example: 10-04-2026 10:00.",
             "host is required and should match the logged-in host name.",
           ])
         : buildInstructionRows(GUEST_REQUIRED_FIELDS, GUEST_OPTIONAL_FIELDS, [
             "category must be Isuzu Employee or UD Employee.",
             "meetingRoom is required only when meetingRoomRequired is true.",
             "proposedRefreshmentTime is required only when refreshmentRequired is true.",
+            "Use date/time format dd-mm-yyyy HH:mm, for example: 10-04-2026 10:00.",
             "host is required and should match the logged-in host name.",
           ]),
       fileName: isVisitor ? "visitor_bulk_upload_template.xlsx" : "guest_bulk_upload_template.xlsx",
     };
   }, [type, hostName]);
 
-  if (!show) return null;
-
-  const resetLocalState = () => {
+  const resetLocalState = useCallback(() => {
     setSelectedFile(null);
     setValidationErrors([]);
     setSummary(null);
     setSubmitting(false);
-  };
+    setHasDownloadedTemplate(false);
+  }, []);
 
-  const closeModal = () => {
+  const closeModal = useCallback(() => {
     if (submitting) return;
     resetLocalState();
     if (typeof onClose === "function") onClose();
-  };
+  }, [submitting, resetLocalState, onClose]);
+
+  useEffect(() => {
+    if (!show) return undefined;
+
+    const onKeyDown = (event) => {
+      if (event.key === "Escape" && !submitting) {
+        closeModal();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [show, submitting, closeModal]);
+
+  if (!show) return null;
 
   const downloadTemplate = () => {
     const templateWorkbook = XLSX.utils.book_new();
@@ -614,6 +673,7 @@ export default function BulkUploadModal({
     XLSX.utils.book_append_sheet(templateWorkbook, instructionsSheet, "Instructions");
 
     XLSX.writeFile(templateWorkbook, content.fileName);
+    setHasDownloadedTemplate(true);
   };
 
   const parseAndValidateFile = async () => {
@@ -715,105 +775,186 @@ export default function BulkUploadModal({
     }
   };
 
+  const step1Done = hasDownloadedTemplate;
+  const step2Done = Boolean(selectedFile);
+  const step3Active = submitting;
+  const step3Done = Boolean(summary);
+
   return (
     <div
       className="position-fixed top-0 start-0 w-100 h-100"
       style={{
-        background: "rgba(15, 23, 42, 0.55)",
+        background: "rgba(15, 23, 42, 0.6)",
         zIndex: 1100,
-        backdropFilter: "blur(2px)",
+        backdropFilter: "blur(3px)",
       }}
       onClick={closeModal}
     >
       <div
-        className="mx-auto mt-5 p-4 rounded-4 shadow-lg bg-white"
-        style={{ maxWidth: "860px", width: "95%", maxHeight: "88vh", overflowY: "auto" }}
+        className="position-absolute top-50 start-50 translate-middle bg-white rounded-4 shadow-lg d-flex flex-column"
+        style={{ width: "min(94vw, 860px)", maxHeight: "88vh", borderRadius: "18px", overflow: "hidden", border: "1px solid #e2e8f0", fontFamily: "'Segoe UI', 'Calibri', 'Helvetica Neue', sans-serif" }}
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="d-flex justify-content-between align-items-center mb-3">
-          <h4 className="mb-0 fw-bold">{content.title}</h4>
-          <button
-            type="button"
-            className="btn btn-outline-secondary btn-sm"
-            onClick={closeModal}
-            disabled={submitting}
-          >
-            Close
-          </button>
-        </div>
-
-        <div className="p-3 rounded-3 border mb-3" style={{ background: "#f8fafc" }}>
-          <p className="mb-2 fw-semibold">Template</p>
-          <p className="mb-2" style={{ fontSize: "0.9rem" }}>
-            Download the template, keep the headers unchanged, and enter real rows below the sample row.
-            The sample row is ignored automatically while processing.
-          </p>
-          <p className="mb-1" style={{ fontSize: "0.88rem" }}>
-            <strong>Required:</strong> {content.requiredFields.join(", ")}
-          </p>
-          <p className="mb-2" style={{ fontSize: "0.88rem" }}>
-            <strong>Optional:</strong> {content.optionalFields.join(", ")}
-          </p>
-          <button type="button" className="btn btn-outline-primary" onClick={downloadTemplate}>
-            Download Template
-          </button>
-        </div>
-
-        <div className="p-3 rounded-3 border mb-3">
-          <label className="form-label fw-semibold">Upload Filled Excel File</label>
-          <input
-            type="file"
-            accept=".xlsx,.xls"
-            className="form-control"
-            onChange={(event) => {
-              const file = event.target.files?.[0] || null;
-              setSelectedFile(file);
-              setValidationErrors([]);
-              setSummary(null);
-            }}
-          />
-          <small className="text-muted d-block mt-2">
-            Only .xlsx or .xls files are supported.
-          </small>
-        </div>
-
-        {validationErrors.length > 0 && (
-          <div className="alert alert-danger" role="alert">
-            <p className="fw-semibold mb-2">Validation errors ({validationErrors.length})</p>
-            <ul className="mb-0" style={{ maxHeight: "220px", overflowY: "auto" }}>
-              {validationErrors.slice(0, 60).map((errorMessage, index) => (
-                <li key={`${errorMessage}-${index}`}>{errorMessage}</li>
-              ))}
-            </ul>
-            {validationErrors.length > 60 && (
-              <p className="mb-0 mt-2">
-                Showing first 60 errors. Fix these and re-upload to see remaining issues.
-              </p>
-            )}
+        <div
+          className="px-3 py-3"
+          style={{ background: "linear-gradient(135deg, #0f172a 0%, #1e293b 58%, #334155 100%)", borderBottom: "2px solid #D8B200" }}
+        >
+          <div className="d-flex justify-content-between align-items-start gap-2">
+            <div>
+              <div className="d-flex align-items-center gap-2 mb-1">
+                <span
+                  className="badge rounded-pill"
+                  style={{ background: "#fff2e0", color: "#7a4a00", border: "1px solid #f2d2a6", fontSize: "0.75rem", letterSpacing: "0.2px", fontWeight: "600" }}
+                >
+                  {content.entityLabel} Import
+                </span>
+              </div>
+              <h4 className="mb-0 fw-bold" style={{ color: "#f8fafc", letterSpacing: "0.2px" }}>{content.title}</h4>
+              <p className="mb-0" style={{ fontSize: "0.92rem", color: "#cbd5e1" }}>{content.subtitle}</p>
+            </div>
+            <button
+              type="button"
+              className="btn btn-sm flex-shrink-0"
+              title="Close"
+              style={{ height: "38px", width: "38px", padding: 0, borderRadius: "50%" }}
+              onClick={closeModal}
+              disabled={submitting}
+            >
+              <FaTimes size={14} color="#f8fafc" />
+            </button>
           </div>
-        )}
+        </div>
 
-        {summary && (
-          <div className="alert alert-success" role="alert">
-            <p className="fw-semibold mb-1">Upload completed</p>
-            <p className="mb-0">
-              Processed rows: {summary.totalRows} | Created records: {summary.createdCount}
+        <div className="p-3 d-flex flex-column gap-2" style={{ overflowY: "auto", background: "#fff" }}>
+          <div
+            className="rounded-3 border px-3 py-2 d-flex align-items-center justify-content-between flex-wrap gap-1"
+            role="status"
+            aria-live="polite"
+            style={{ background: "#f8fafc", borderColor: "#dbe3ec", userSelect: "none" }}
+          >
+            <div className="d-inline-flex align-items-center gap-2" style={{ color: step1Done ? "#166534" : "#475569", fontSize: "0.86rem", fontWeight: "600" }}>
+              <FaCheckCircle size={12} color={step1Done ? "#15803d" : "#94a3b8"} /> 1. Template
+            </div>
+            <div className="d-inline-flex align-items-center gap-2" style={{ color: step2Done ? "#166534" : "#475569", fontSize: "0.86rem", fontWeight: "600" }}>
+              <FaCheckCircle size={12} color={step2Done ? "#15803d" : "#94a3b8"} /> 2. Upload
+            </div>
+            <div className="d-inline-flex align-items-center gap-2" style={{ color: step3Done ? "#166534" : step3Active ? "#0f4f78" : "#475569", fontSize: "0.86rem", fontWeight: "600" }}>
+              {step3Active ? (
+                <span className="spinner-border spinner-border-sm" style={{ width: "12px", height: "12px", borderWidth: "2px", color: "#0f4f78" }} />
+              ) : (
+                <FaCheckCircle size={12} color={step3Done ? "#15803d" : "#94a3b8"} />
+              )}
+              3. Validate &amp; Import
+            </div>
+          </div>
+
+          <div className="d-flex align-items-center justify-content-between flex-wrap gap-1 px-1">
+            <p className="mb-0" style={{ color: "#475569", fontSize: "0.84rem" }}>
+              Tips: Keep header order unchanged, keep the sample row, and use a valid date/time format.
+            </p>
+            <span style={{ color: "#64748b", fontSize: "0.8rem", fontWeight: "500" }}>Press Esc to close</span>
+          </div>
+
+          <div className="p-2 rounded-3 border" style={{ background: "#fffcf2", border: "1px solid #efdca0", borderLeft: "5px solid #D8B200" }}>
+            <div className="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-1">
+              <p className="mb-0 fw-semibold" style={{ color: "#6b5600" }}>Step 1: Download the template</p>
+              <button type="button" className="btn btn-sm" style={{ background: "#D8B200", color: "#1f2937", border: "none", fontWeight: "700", transition: "all 0.22s cubic-bezier(0.22,1,0.36,1)" }} onClick={downloadTemplate}>
+                Download Template
+              </button>
+            </div>
+            <p className="mb-1" style={{ fontSize: "0.88rem" }}>
+              Keep the headers unchanged and fill real rows below the sample row. The sample row is ignored automatically.
+            </p>
+            <p className="mb-1" style={{ fontSize: "0.88rem" }}>
+              <strong>Required:</strong> {content.requiredFields.join(", ")}
+            </p>
+            <p className="mb-0" style={{ fontSize: "0.88rem" }}>
+              <strong>Optional:</strong> {content.optionalFields.join(", ")}
             </p>
           </div>
-        )}
 
-        <div className="d-flex justify-content-end gap-2">
-          <button type="button" className="btn btn-outline-danger" onClick={closeModal} disabled={submitting}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn btn-success"
-            onClick={handleSubmit}
-            disabled={submitting || !selectedFile}
-          >
-            {submitting ? "Validating and Uploading..." : "Validate and Submit"}
-          </button>
+          <div className="p-2 rounded-3 border" style={{ background: "#fffaf3", border: "1px solid #f2d2a6", borderLeft: "5px solid #F08C00" }}>
+            <label className="form-label fw-semibold mb-1" style={{ color: "#7a4a00" }}>Step 2: Upload your filled Excel file</label>
+            <div
+              className="rounded-3 p-2"
+              style={{ border: "1.5px dashed #f0c98a", background: "#fff" }}
+            >
+              <input
+                type="file"
+                accept=".xlsx,.xls"
+                className="form-control"
+                onChange={(event) => {
+                  const file = event.target.files?.[0] || null;
+                  setSelectedFile(file);
+                  setValidationErrors([]);
+                  setSummary(null);
+                }}
+              />
+              <small className="text-muted d-block mt-1">
+                Supported formats: .xlsx and .xls
+              </small>
+              {selectedFile && (
+                <div className="mt-1 px-2 py-1 rounded-2 d-flex align-items-center justify-content-between gap-2" style={{ background: "#eef9ff", color: "#0f4f78", fontSize: "0.84rem" }}>
+                  <span>
+                    Selected file: <strong>{selectedFile.name}</strong> ({formatFileSize(selectedFile.size)})
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline-secondary"
+                    style={{ padding: "2px 8px", fontSize: "0.74rem" }}
+                    onClick={() => {
+                      setSelectedFile(null);
+                      setValidationErrors([]);
+                      setSummary(null);
+                    }}
+                    disabled={submitting}
+                  >
+                    Clear
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {validationErrors.length > 0 && (
+            <div className="alert alert-danger mb-0" role="alert">
+              <p className="fw-semibold mb-2">Validation errors ({validationErrors.length})</p>
+              <ul className="mb-0" style={{ maxHeight: "220px", overflowY: "auto" }}>
+                {validationErrors.slice(0, 60).map((errorMessage, index) => (
+                  <li key={`${errorMessage}-${index}`}>{errorMessage}</li>
+                ))}
+              </ul>
+              {validationErrors.length > 60 && (
+                <p className="mb-0 mt-2">
+                  Showing first 60 errors. Fix these and re-upload to see remaining issues.
+                </p>
+              )}
+            </div>
+          )}
+
+          {summary && (
+            <div className="alert alert-success mb-0" role="alert">
+              <p className="fw-semibold mb-1">Upload completed</p>
+              <p className="mb-0">
+                Processed rows: {summary.totalRows} | Created records: {summary.createdCount}
+              </p>
+            </div>
+          )}
+
+          <div className="d-flex justify-content-end gap-2 pt-0">
+            <button type="button" className="btn btn-outline-danger" onClick={closeModal} disabled={submitting}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn"
+              style={{ background: "linear-gradient(135deg, #D8B200 0%, #f59e0b 100%)", color: "#1f2937", border: "none", fontWeight: "700", minWidth: "220px", letterSpacing: "0.01em", boxShadow: "0 6px 14px rgba(216,178,0,0.28)", transition: "all 0.22s cubic-bezier(0.22,1,0.36,1)" }}
+              onClick={handleSubmit}
+              disabled={submitting || !selectedFile}
+            >
+              {submitting ? "Running validation and import..." : `Validate and Import ${content.entityName}`}
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -4,15 +4,21 @@ import tt from "../images/logo.png";
 import { FaSignOutAlt, FaFileExcel, FaUser } from "react-icons/fa";
 import { motion } from "framer-motion";
 
+// -----------------changed by rebanta--------------
+// Removed useMsal import and MSAL account logic; added profileAction, profileLabel, profileTooltip, and userName props with default values
 export default function Navbar({ exportToExcel, adhoc, profileAction, profileLabel = "Repeat Visitors", profileTooltip = "View repeat visitor and guest history", userName = "Security" }) {
+// -------------------------------------------------
   const navigate = useNavigate();
 
+  // -----------------changed by rebanta--------------
+  // Replaced MSAL account-based auth (useMsal, accounts) with hardcoded isLoggedIn=true; simplified handleLogout from async/try-catch to synchronous
   // ✅ Force logged-in state
   const isLoggedIn = true;
 
   const handleLogout = () => {
     navigate("/");
   };
+  // -------------------------------------------------
 
   return (
     <nav className="navbar navbar-expand-lg">
@@ -26,8 +32,13 @@ export default function Navbar({ exportToExcel, adhoc, profileAction, profileLab
           />
         </Link>
 
+        {/* -----------------changed by rebanta-------------- */}
+        {/* Changed from ternary (isLoggedIn ? ... : SecurityLogin link) to && — removed "Security Login" fallback and "Welcome, {userName}" display span */}
+        {/* ------------------------------------------------- */}
         {isLoggedIn && (
           <div className="d-flex align-items-center gap-2">
+            {/* -----------------changed by rebanta-------------- */}
+            {/* Replaced truthiness check (exportToExcel &&) with typeof function guard; removed boxShadow from whileHover */}
             {typeof exportToExcel === "function" && (
               <motion.button
                 className="custom-btn d-flex align-items-center px-3 py-1"
@@ -40,7 +51,10 @@ export default function Navbar({ exportToExcel, adhoc, profileAction, profileLab
                 Export to Excel
               </motion.button>
             )}
+            {/* ------------------------------------------------- */}
 
+            {/* -----------------changed by rebanta-------------- */}
+            {/* Replaced truthiness check (adhoc &&) with typeof function guard; removed boxShadow from whileHover */}
             {typeof adhoc === "function" && (
               <motion.button
                 className="custom-btn d-flex align-items-center px-3 py-1"
@@ -52,7 +66,10 @@ export default function Navbar({ exportToExcel, adhoc, profileAction, profileLab
                 Ad-hoc
               </motion.button>
             )}
+            {/* ------------------------------------------------- */}
 
+            {/* -----------------changed by rebanta-------------- */}
+            {/* New: profile/repeat visitors button with avatar initials derived from userName and gold gradient styling */}
             {typeof profileAction === "function" && (
               <motion.button
                 onClick={profileAction}
@@ -108,7 +125,10 @@ export default function Navbar({ exportToExcel, adhoc, profileAction, profileLab
                 </span>
               </motion.button>
             )}
+            {/* ------------------------------------------------- */}
 
+            {/* -----------------changed by rebanta-------------- */}
+            {/* Removed boxShadow from whileHover on Home/logout button */}
             <motion.button
               className="custom-btn d-flex align-items-center px-3 py-1"
               onClick={handleLogout}
@@ -118,6 +138,7 @@ export default function Navbar({ exportToExcel, adhoc, profileAction, profileLab
               <FaSignOutAlt className="me-2" />
               Home
             </motion.button>
+            {/* ------------------------------------------------- */}
           </div>
         )}
       </div>

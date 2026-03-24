@@ -1,4 +1,7 @@
 import express from "express";
+// -----------------changed by rebanta--------------
+// Replaced controller-based routing with direct model-based route handlers plus pass-tracking
+// and checkout-email helpers used by the inline visitor endpoints below
 import Visitor from "../models/Visitor.js";
 import {
   addPassEventAtomic,
@@ -6,12 +9,16 @@ import {
   requiresFinalDayPassReturnBeforeCheckout,
 } from "../utils/passTracking.js";
 import { resolveOfficialHostEmail, sendCheckoutEmailToHost } from "../email/emailservice.js";
+// -------------------------------------------------
 
 const router = express.Router();
 
 /* =========================
    Create Visitor
 ========================= */
+// -----------------changed by rebanta--------------
+// Replaced controller import usage with inline create/get/update handlers so pass-tracking
+// and checkout email behavior can be handled directly in this route module
 router.post("/", async (req, res) => {
   try {
     const visitors = await Visitor.insertMany(req.body);
@@ -86,7 +93,10 @@ router.put("/:id", async (req, res) => {
     res.status(400).json({ error: error.message });
   }
 });
+// -------------------------------------------------
 
+// -----------------changed by rebanta--------------
+// New route for recording visitor daily pass issue/return actions
 router.post("/:id/pass-events", async (req, res) => {
   try {
     const result = await addPassEventAtomic({
@@ -108,10 +118,13 @@ router.post("/:id/pass-events", async (req, res) => {
     res.status(400).json({ error: error.message });
   }
 });
+// -------------------------------------------------
 
 /* =========================
    Soft Remove (UI Remove)
 ========================= */
+// -----------------changed by rebanta--------------
+// Replaced PUT /:id/remove-ui controller route with inline PATCH /:id/remove soft-delete handler
 router.patch("/:id/remove", async (req, res) => {
   try {
     const updated = await Visitor.findByIdAndUpdate(
@@ -128,5 +141,24 @@ router.patch("/:id/remove", async (req, res) => {
     res.status(400).json({ error: error.message });
   }
 });
+
+// Backward-compatible alias for existing frontend calls.
+router.put("/:id/remove-ui", async (req, res) => {
+  try {
+    const updated = await Visitor.findByIdAndUpdate(
+      req.params.id,
+      {
+        uiRemoved: true,
+        removedAt: new Date(),
+        status: "removed"
+      },
+      { new: true }
+    );
+    res.json(updated);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+// -------------------------------------------------
 
 export default router;   // ✅ VERY IMPORTANT
