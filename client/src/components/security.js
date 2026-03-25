@@ -2337,6 +2337,7 @@ const getConsentLabel = (v) => {
         .visit-step-rail .pass-step-line {
           flex: 0 0 24px;
           width: 24px;
+          background: #0f172a;
         }
         .psc-next-slate {
           background: #ffffff;
