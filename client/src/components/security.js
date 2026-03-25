@@ -116,7 +116,9 @@ const getDailyPassEvents = (visitor) => (
 );
 
 const isLongPeriodVisit = (visitor) => {
-  const startDateKey = getPassDateKey(visitor?.actualInTime || visitor?.inTime);
+  // Always use the scheduled inTime, not actualInTime — early authorization must
+  // not reclassify a single-day visit as a multi-day (pass-tracking) visit.
+  const startDateKey = getPassDateKey(visitor?.inTime);
   const finalOutDateKey = getPassDateKey(visitor?.outTime);
   return Boolean(startDateKey && finalOutDateKey && startDateKey < finalOutDateKey);
 };
@@ -241,6 +243,30 @@ const isOverdue24Hours = (v) => {
   return Date.now() > inMs + 24 * 60 * 60 * 1000;
 };
 
+// Groups dailyPassEvents into paired issue/return cycles, sorted newest first.
+const buildPassHistory = (visitor) => {
+  const events = Array.isArray(visitor?.dailyPassEvents) ? visitor.dailyPassEvents : [];
+  if (!events.length) return [];
+  const byDate = {};
+  events.forEach((e) => {
+    if (!byDate[e.dateKey]) byDate[e.dateKey] = { issues: [], returns: [] };
+    if (e.action === "issued") byDate[e.dateKey].issues.push(e);
+    else if (e.action === "returned") byDate[e.dateKey].returns.push(e);
+  });
+  const rows = [];
+  Object.entries(byDate)
+    .sort(([a], [b]) => b.localeCompare(a))
+    .forEach(([dateKey, { issues, returns }]) => {
+      issues.sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
+      returns.sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
+      const count = Math.max(issues.length, returns.length);
+      for (let i = count - 1; i >= 0; i--) {
+        rows.push({ dateKey, cycle: i + 1, issueEvent: issues[i] || null, returnEvent: returns[i] || null });
+      }
+    });
+  return rows;
+};
+
 const isCheckoutOlderThanWeek = (v) => {
   //--------------------------changed by rebanta------------------------------//
   // Explanation: Determines whether checkout timestamp is older than one week for UI filtering.
@@ -280,7 +306,6 @@ export default function Security() {
     hostApproved: false,
   });
 
-  const [sortOrder] = useState("asc");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [quickFilter, setQuickFilter] = useState("none");
@@ -404,7 +429,7 @@ export default function Security() {
     setFilteredVisitors(result);
     setExportFilteredVisitors(exportResult);
     //--------------------------changed by rebanta------------------------------//
-  }, [visitors, statusFilter, searchQuery, sortOrder, dateFrom, dateTo, quickFilter, nowTick]); // ✅ CHANGED
+  }, [visitors, statusFilter, searchQuery, dateFrom, dateTo, quickFilter, nowTick]);
 
 
   //--------------------------changed by rebanta------------------------------//
@@ -889,7 +914,6 @@ const getConsentLabel = (v) => {
 
 
     const isGuest = visitor.source === "guest";
-    // const hostName = visitor.submittedBy || "-";
 
     const printContent = `
     <div class="visitor-card">
@@ -1265,7 +1289,7 @@ const getConsentLabel = (v) => {
                 const canFinalizeRepeatedToday =
                   isFinalDayRepeated && (!passTracking.issueToday || Boolean(passTracking.returnToday));
                 const showOnlyCheckout = canFinalizeRepeatedToday || isAfterFinalDayRepeated;
-                const basicJourneyEnabled = !passTracking.enabled && v.source !== "adhoc";
+                const basicJourneyEnabled = !passTracking.enabled;
                 const basicCanAuthorize = basicJourneyEnabled && v.status === "new";
                 const basicStep1State = v.status === "new" ? "next-slate" : "done-slate";
                 const basicStep2State = v.status === "checkedIn" ? "current-teal" : v.status === "checkedOut" ? "done-teal" : "idle";
@@ -1372,14 +1396,14 @@ const getConsentLabel = (v) => {
                               title={basicCanAuthorize ? "Authorize" : undefined}
                               style={{ cursor: basicCanAuthorize ? "pointer" : "default" }}
                             >
-                              1
+                              {basicStep1State === "done-slate" ? "✓" : "1"}
                             </div>
                             <div className="pass-step-lbl pass-step-lbl-await">{basicStep1Label}</div>
                           </div>
                           <div className={`pass-step-line ${v.status !== "new" ? "psl-slate" : "psl-idle"}`} />
                           <div className="pass-step-col">
                             <div className={`pass-step-circle ${basicStep2State === "current-teal" ? "psc-current-teal" : basicStep2State === "done-teal" ? "psc-done-teal" : "psc-idle"}`}>
-                              2
+                              {basicStep2State === "done-teal" ? "✓" : "2"}
                             </div>
                             <div className="pass-step-lbl pass-step-lbl-onsite">Checked In</div>
                           </div>
@@ -1404,24 +1428,27 @@ const getConsentLabel = (v) => {
                     )}
 
                     {passTracking.enabled && (() => {
+                      const schedStartKey = getPassDateKey(v.inTime);
                       const startKey = getPassDateKey(v.actualInTime || v.inTime);
                       const endKey = getPassDateKey(v.outTime);
                       const todayKey = getPassDateKey(guardNow);
                       let arcDayN = 1, arcTotal = 1;
-                      if (startKey && endKey) {
+                      if (schedStartKey && endKey) {
                         const msPerDay = 86400000;
+                        const schedStartMs = new Date(schedStartKey + "T12:00:00Z").getTime();
                         const startMs = new Date(startKey + "T12:00:00Z").getTime();
                         const endMs = new Date(endKey + "T12:00:00Z").getTime();
                         const todayMs = new Date(todayKey + "T12:00:00Z").getTime();
-                        arcTotal = Math.max(1, Math.round((endMs - startMs) / msPerDay) + 1);
+                        arcTotal = Math.max(1, Math.round((endMs - schedStartMs) / msPerDay) + 1);
                         arcDayN = Math.max(1, Math.min(Math.round((todayMs - startMs) / msPerDay) + 1, arcTotal));
                       }
                       const R = 20, cx = 26, cy = 26;
                       const circ = 2 * Math.PI * R;
                       const arcFilled = circ * Math.min(arcDayN / arcTotal, 1);
 
-                      const isFirstDay = arcDayN === 1;
-                      const isAuthorizeMode = isFirstDay && v.status === "new";
+                      // isAuthorizeMode must be based on status only — arcDayN can be > 1
+                      // for a visitor whose inTime was yesterday but still not authorized.
+                      const isAuthorizeMode = v.status === "new";
                       const step1State = passTracking.issueToday
                         ? "done"
                         : isAuthorizeMode
@@ -1574,7 +1601,8 @@ const getConsentLabel = (v) => {
                         <button className="btn btn-outline-dark btn-sm rounded-pill" onClick={() => openDetails(v)}>
                           View Details
                         </button>
-                        {isRepeatedRecord && showOnlyCheckout && (
+                        {/* Show checkout only for non-repeated visitors (basic/adhoc). Repeated visitors check out via View Details on final/overdue day. */}
+                        {!isRepeatedRecord && (
                           <button className="btn btn-warning btn-sm rounded-pill" onClick={() => openCheckout(v)}>
                             Check Out
                           </button>
@@ -1917,82 +1945,119 @@ const getConsentLabel = (v) => {
       </AnimatePresence>
 
       {/*----------------------------------Changes by Anup----------------------------------------------------------------------- */}
-      <AnimatePresence> {/*runs if and only if showDetails is true and detailsVisitor contains data */}
-        {showDetails && detailsVisitor && (
-          <motion.div
-            className="modal show d-block"
-            style={{ background: "rgba(0,0,0,0.6)" }}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
-            <div className="modal-dialog modal-dialog-centered modal-lg">
-              <div className="modal-content p-4 rounded-4">
+      <AnimatePresence>
+        {showDetails && detailsVisitor && (() => {
+          const detailsCanCheckout = detailsVisitor.status === "checkedIn";
+          const passHistory = buildPassHistory(detailsVisitor);
+          return (
+            <motion.div
+              className="modal show d-block"
+              style={{ background: "rgba(0,0,0,0.6)" }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <div className="modal-dialog modal-dialog-centered modal-lg">
+                <div className="modal-content p-4 rounded-4">
 
-                <h3 className="text-center fw-bold mb-4">
+                  <h3 className="text-center fw-bold mb-4">
                     {detailsVisitor?.source === "guest" ? "Guest Details" : detailsVisitor?.source === "adhoc" ? "Adhoc Visitor Details" : "Visitor Details"}
                   </h3>
 
-                <div className="row">
-
-                  <div className="col-md-6 mb-2">
-                    <b>Phone Number:</b><br />
-                    {detailsVisitor.phone || "-"}
-                  </div>
-
-                  <div className="col-md-6 mb-2">
-                    <b>Email:</b><br />
-                    {detailsVisitor.email || "-"}
-                  </div>
-
-                  <div className="col-md-6 mb-2">
-                    <b>Meeting Room:</b><br />
-                    {detailsVisitor?.source === "adhoc" ? "-" : detailsVisitor.meetingRoom || "-"}
-                  </div>
-
-                  {/* Laptop serial ONLY for visitors */}
-                  {detailsVisitor.source !== "guest" && (
+                  <div className="row">
                     <div className="col-md-6 mb-2">
-                      <b>Laptop Serial No:</b><br />
-                      {detailsVisitor.laptopSerial || "-"}
+                      <b>Phone Number:</b><br />
+                      {detailsVisitor.phone || "-"}
                     </div>
-                  )}
-
-                  {/* Refreshments ONLY for guests */}
-                  {detailsVisitor.source === "guest" && (
-                    <>
+                    <div className="col-md-6 mb-2">
+                      <b>Email:</b><br />
+                      {detailsVisitor.email || "-"}
+                    </div>
+                    <div className="col-md-6 mb-2">
+                      <b>Meeting Room:</b><br />
+                      {detailsVisitor?.source === "adhoc" ? "-" : detailsVisitor.meetingRoom || "-"}
+                    </div>
+                    {detailsVisitor.source !== "guest" && (
                       <div className="col-md-6 mb-2">
-                        <b>Refreshments:</b><br />
-                        {detailsVisitor.refreshmentRequired ? "Yes" : "No"}
+                        <b>Laptop Serial No:</b><br />
+                        {detailsVisitor.laptopSerial || "-"}
                       </div>
+                    )}
+                    {detailsVisitor.source === "guest" && (
+                      <>
+                        <div className="col-md-6 mb-2">
+                          <b>Refreshments:</b><br />
+                          {detailsVisitor.refreshmentRequired ? "Yes" : "No"}
+                        </div>
+                        <div className="col-md-6 mb-2">
+                          <b>Refreshments Time:</b><br />
+                          {detailsVisitor.proposedRefreshmentTime ? new Date(detailsVisitor.proposedRefreshmentTime).toLocaleString("en-IN") : "-"}
+                        </div>
+                      </>
+                    )}
+                    <div className="col-md-6 mb-2">
+                      <b>Guest WiFi Required:</b><br />
+                      {detailsVisitor.guestWifiRequired ? "Yes" : "No"}
+                    </div>
+                  </div>
 
-                      <div className="col-md-6 mb-2">
-                        <b>Refreshments Time:</b><br />
-                        {detailsVisitor.proposedRefreshmentTime ? new Date(detailsVisitor.proposedRefreshmentTime).toLocaleString("en-IN") : "-"}
+                  {passHistory.length > 0 && (
+                    <>
+                      <hr className="my-3" />
+                      <h5 className="fw-bold mb-3">Pass History</h5>
+                      <div style={{ overflowX: "auto" }}>
+                        <table className="table table-sm table-bordered align-middle" style={{ fontSize: "0.82rem" }}>
+                          <thead className="table-light">
+                            <tr>
+                              <th>Date</th>
+                              <th>Cycle</th>
+                              <th>Issued At</th>
+                              <th>Returned At</th>
+                              <th>Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {passHistory.map((row, idx) => (
+                              <tr key={idx}>
+                                <td>{row.dateKey}</td>
+                                <td>{row.cycle}</td>
+                                <td>{row.issueEvent ? formatIST(row.issueEvent.recordedAt) : "-"}</td>
+                                <td>{row.returnEvent ? formatIST(row.returnEvent.recordedAt) : "-"}</td>
+                                <td>
+                                  {row.returnEvent
+                                    ? <span className="badge bg-dark rounded-pill">Returned</span>
+                                    : <span className="badge bg-warning text-dark rounded-pill">Pending</span>}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
                     </>
                   )}
 
-                  <div className="col-md-6 mb-2">
-                    <b>Guest WiFi Required:</b><br />
-                    {detailsVisitor.guestWifiRequired ? "Yes" : "No"}
+                  <div className="text-center mt-4 d-flex justify-content-center gap-2">
+                    {detailsCanCheckout && (
+                      <button
+                        className="btn btn-warning btn-sm rounded-pill px-4"
+                        onClick={() => { setShowDetails(false); openCheckout(detailsVisitor); }}
+                      >
+                        Check Out (Optional)
+                      </button>
+                    )}
+                    <button
+                      className="btn btn-dark rounded-pill px-4"
+                      onClick={() => setShowDetails(false)}
+                    >
+                      Close
+                    </button>
                   </div>
-                  
-                </div>
 
-                <div className="text-center mt-4">
-                  <button
-                    className="btn btn-dark rounded-pill px-4"
-                    onClick={() => setShowDetails(false)} 
-                  >
-                    Close
-                  </button>
                 </div>
-
               </div>
-            </div>
-          </motion.div>
-        )}
+            </motion.div>
+          );
+        })()}
       </AnimatePresence>
       {/*----------------------------------Changes by Anup----------------------------------------------------------------------- */}
 
@@ -2143,10 +2208,6 @@ const getConsentLabel = (v) => {
           0%, 100% { box-shadow: 0 0 0 0 rgba(37,99,235,0.45); }
           50%       { box-shadow: 0 0 0 9px rgba(37,99,235,0); }
         }
-        @keyframes pscPulseIndigo {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(99,102,241,0.5); }
-          50%       { box-shadow: 0 0 0 9px rgba(99,102,241,0); }
-        }
         @keyframes pscPulseAmber {
           0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.5); }
           50%       { box-shadow: 0 0 0 9px rgba(245,158,11,0); }
@@ -2286,14 +2347,6 @@ const getConsentLabel = (v) => {
           border-color: #f59e0b;
           color: #713f12;
           box-shadow: none;
-        }
-        @keyframes pscPulseSlate {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(71, 85, 105, 0.42); }
-          50% { box-shadow: 0 0 0 10px rgba(71, 85, 105, 0); }
-        }
-        @keyframes pscPulseTeal {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(20, 184, 166, 0.42); }
-          50% { box-shadow: 0 0 0 10px rgba(20, 184, 166, 0); }
         }
         .psl-slate {
           background: #64748b;

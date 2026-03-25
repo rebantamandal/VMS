@@ -172,25 +172,41 @@ const parseExcelDate = (value) => {
   if (value === null || value === undefined || value === "") return null;
 
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    // Reject date-only cells (00:00) because template requires explicit date + time.
+    if (
+      value.getHours() === 0 &&
+      value.getMinutes() === 0 &&
+      value.getSeconds() === 0 &&
+      value.getMilliseconds() === 0
+    ) {
+      return null;
+    }
     return value;
   }
 
   if (typeof value === "number") {
     const parsed = XLSX.SSF.parse_date_code(value);
     if (!parsed) return null;
+    // Integer Excel serials represent date-only values (no time-of-day).
+    if (
+      Number.isInteger(value) ||
+      ((parsed.H || 0) === 0 && (parsed.M || 0) === 0 && (parsed.S || 0) === 0)
+    ) {
+      return null;
+    }
     return new Date(parsed.y, parsed.m - 1, parsed.d, parsed.H, parsed.M, parsed.S);
   }
 
   if (typeof value === "string") {
     const raw = toText(value);
     // Strict text format for template input: dd-mm-yyyy HH:mm (or dd/mm/yyyy HH:mm)
-    const dmyMatch = raw.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?:[\sT,]+(\d{1,2}):(\d{2}))?$/);
+    const dmyMatch = raw.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})[\sT,]+(\d{1,2}):(\d{2})$/);
     if (dmyMatch) {
       const day = Number.parseInt(dmyMatch[1], 10);
       const month = Number.parseInt(dmyMatch[2], 10);
       const year = Number.parseInt(dmyMatch[3], 10);
-      const hour = dmyMatch[4] ? Number.parseInt(dmyMatch[4], 10) : 0;
-      const minute = dmyMatch[5] ? Number.parseInt(dmyMatch[5], 10) : 0;
+      const hour = Number.parseInt(dmyMatch[4], 10);
+      const minute = Number.parseInt(dmyMatch[5], 10);
 
       const candidate = new Date(year, month - 1, day, hour, minute, 0, 0);
       if (
@@ -203,10 +219,24 @@ const parseExcelDate = (value) => {
       }
       return null;
     }
+
+    // If text has no explicit time part, reject.
+    if (!/(?:\s|T)\d{1,2}:\d{2}/.test(raw)) {
+      return null;
+    }
   }
 
   const parsed = new Date(toText(value));
   if (Number.isNaN(parsed.getTime())) return null;
+  // Fallback parser should still enforce non-zero time-of-day.
+  if (
+    parsed.getHours() === 0 &&
+    parsed.getMinutes() === 0 &&
+    parsed.getSeconds() === 0 &&
+    parsed.getMilliseconds() === 0
+  ) {
+    return null;
+  }
   return parsed;
 };
 
@@ -577,9 +607,8 @@ export default function BulkUploadModal({
   onClose,
   onSuccess,
 }) {
-  const [selectedFile, setSelectedFile] = useState(null);
+  const [selectedFiles, setSelectedFiles] = useState([]);
   const [validationErrors, setValidationErrors] = useState([]);
-  const [summary, setSummary] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [hasDownloadedTemplate, setHasDownloadedTemplate] = useState(false);
 
@@ -617,9 +646,8 @@ export default function BulkUploadModal({
   }, [type, hostName]);
 
   const resetLocalState = useCallback(() => {
-    setSelectedFile(null);
+    setSelectedFiles([]);
     setValidationErrors([]);
-    setSummary(null);
     setSubmitting(false);
     setHasDownloadedTemplate(false);
   }, []);
@@ -676,69 +704,84 @@ export default function BulkUploadModal({
     setHasDownloadedTemplate(true);
   };
 
-  const parseAndValidateFile = async () => {
-    if (!selectedFile) {
-      setValidationErrors(["Please choose an Excel file first."]);
+  const parseAndValidateFiles = async () => {
+    if (!selectedFiles.length) {
+      setValidationErrors(["Please choose at least one Excel file first."]);
       return null;
     }
 
-    const fileBytes = await selectedFile.arrayBuffer();
-    const workbook = XLSX.read(fileBytes, { type: "array", cellDates: true });
-    const firstSheetName = workbook.SheetNames[0];
+    const allErrors = [];
+    const allPayload = [];
 
-    if (!firstSheetName) {
-      setValidationErrors(["Uploaded file does not contain a worksheet."]);
-      return null;
+    for (const selectedFile of selectedFiles) {
+      const fileTag = `[${selectedFile.name}]`;
+
+      try {
+        const fileBytes = await selectedFile.arrayBuffer();
+        const workbook = XLSX.read(fileBytes, { type: "array", cellDates: true });
+        const firstSheetName = workbook.SheetNames[0];
+
+        if (!firstSheetName) {
+          allErrors.push(`${fileTag} Uploaded file does not contain a worksheet.`);
+          continue;
+        }
+
+        const sheet = workbook.Sheets[firstSheetName];
+        const { headers, rows } = extractRows(sheet);
+
+        const headerErrors = validateTemplateHeaders(headers, content.headers);
+        if (headerErrors.length > 0) {
+          allErrors.push(...headerErrors.map((err) => `${fileTag} ${err}`));
+          continue;
+        }
+
+        const allRows = rows.map(({ lineNumber, row }) => ({
+          lineNumber,
+          row: normalizeRowKeys(row),
+        }));
+
+        const filteredRows = allRows.filter(({ row }) => !isEmptyRow(row));
+        const dataRows = filteredRows.filter(({ row }) => {
+          if (type === "visitor") return !isVisitorSampleRow(row);
+          return !isGuestSampleRow(row);
+        });
+
+        if (!dataRows.length) {
+          allErrors.push(`${fileTag} No data rows found. Keep at least one real row below the sample row.`);
+          continue;
+        }
+
+        const result =
+          type === "visitor"
+            ? validateVisitorRows(dataRows, hostName, submittedBy)
+            : validateGuestRows(dataRows, hostName, submittedBy);
+
+        if (result.errors.length > 0) {
+          allErrors.push(...result.errors.map((err) => `${fileTag} ${err}`));
+          continue;
+        }
+
+        allPayload.push(...result.payload);
+      } catch (error) {
+        allErrors.push(`${fileTag} Failed to read file: ${error.message || "Unknown parsing error."}`);
+      }
     }
 
-    const sheet = workbook.Sheets[firstSheetName];
-    const { headers, rows } = extractRows(sheet);
-
-    const headerErrors = validateTemplateHeaders(headers, content.headers);
-    if (headerErrors.length > 0) {
-      setValidationErrors(headerErrors);
-      return null;
-    }
-
-    const allRows = rows.map(({ lineNumber, row }) => ({
-      lineNumber,
-      row: normalizeRowKeys(row),
-    }));
-
-    const filteredRows = allRows.filter(({ row }) => !isEmptyRow(row));
-    const dataRows = filteredRows.filter(({ row }) => {
-      if (type === "visitor") return !isVisitorSampleRow(row);
-      return !isGuestSampleRow(row);
-    });
-
-    if (!dataRows.length) {
-      setValidationErrors([
-        "No data rows found. Keep at least one real row below the sample row.",
-      ]);
-      return null;
-    }
-
-    const result =
-      type === "visitor"
-        ? validateVisitorRows(dataRows, hostName, submittedBy)
-        : validateGuestRows(dataRows, hostName, submittedBy);
-
-    if (result.errors.length > 0) {
-      setValidationErrors(result.errors);
+    if (allErrors.length > 0) {
+      setValidationErrors(allErrors);
       return null;
     }
 
     setValidationErrors([]);
-    return result.payload;
+    return allPayload;
   };
 
   const handleSubmit = async () => {
     if (submitting) return;
     setSubmitting(true);
-    setSummary(null);
 
     try {
-      const payload = await parseAndValidateFile();
+      const payload = await parseAndValidateFiles();
       if (!payload) return;
 
       const response = await axios.post(`${process.env.REACT_APP_API_URL}${content.endpoint}`, payload);
@@ -751,8 +794,6 @@ export default function BulkUploadModal({
         totalRows: payload.length,
         createdCount,
       };
-
-      setSummary(successSummary);
 
       Swal.fire({
         icon: "success",
@@ -776,9 +817,8 @@ export default function BulkUploadModal({
   };
 
   const step1Done = hasDownloadedTemplate;
-  const step2Done = Boolean(selectedFile);
+  const step2Done = selectedFiles.length > 0;
   const step3Active = submitting;
-  const step3Done = Boolean(summary);
 
   return (
     <div
@@ -856,11 +896,11 @@ export default function BulkUploadModal({
             <div className="d-inline-flex align-items-center gap-2" style={{ color: step2Done ? "#166534" : "#475569", fontSize: "0.86rem", fontWeight: "600" }}>
               <FaCheckCircle size={12} color={step2Done ? "#15803d" : "#94a3b8"} /> 2. Upload
             </div>
-            <div className="d-inline-flex align-items-center gap-2" style={{ color: step3Done ? "#166534" : step3Active ? "#0f4f78" : "#475569", fontSize: "0.86rem", fontWeight: "600" }}>
+            <div className="d-inline-flex align-items-center gap-2" style={{ color: step3Active ? "#0f4f78" : "#475569", fontSize: "0.86rem", fontWeight: "600" }}>
               {step3Active ? (
                 <span className="spinner-border spinner-border-sm" style={{ width: "12px", height: "12px", borderWidth: "2px", color: "#0f4f78" }} />
               ) : (
-                <FaCheckCircle size={12} color={step3Done ? "#15803d" : "#94a3b8"} />
+                <FaCheckCircle size={12} color="#94a3b8" />
               )}
               3. Validate &amp; Import
             </div>
@@ -892,7 +932,7 @@ export default function BulkUploadModal({
           </div>
 
           <div className="p-2 rounded-3 border" style={{ background: "#fffaf3", border: "1px solid #f2d2a6", borderLeft: "5px solid #F08C00" }}>
-            <label className="form-label fw-semibold mb-1" style={{ color: "#7a4a00" }}>Step 2: Upload your filled Excel file</label>
+            <label className="form-label fw-semibold mb-1" style={{ color: "#7a4a00" }}>Step 2: Upload one or more filled Excel files</label>
             <div
               className="rounded-3 p-2"
               style={{ border: "1.5px dashed #f0c98a", background: "#fff" }}
@@ -901,34 +941,42 @@ export default function BulkUploadModal({
                 type="file"
                 accept=".xlsx,.xls"
                 className="form-control"
+                multiple
                 onChange={(event) => {
-                  const file = event.target.files?.[0] || null;
-                  setSelectedFile(file);
+                  const files = Array.from(event.target.files || []);
+                  setSelectedFiles(files);
                   setValidationErrors([]);
-                  setSummary(null);
                 }}
               />
               <small className="text-muted d-block mt-1">
-                Supported formats: .xlsx and .xls
+                Supported formats: .xlsx and .xls (multiple files allowed)
               </small>
-              {selectedFile && (
-                <div className="mt-1 px-2 py-1 rounded-2 d-flex align-items-center justify-content-between gap-2" style={{ background: "#eef9ff", color: "#0f4f78", fontSize: "0.84rem" }}>
-                  <span>
-                    Selected file: <strong>{selectedFile.name}</strong> ({formatFileSize(selectedFile.size)})
-                  </span>
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-outline-secondary"
-                    style={{ padding: "2px 8px", fontSize: "0.74rem" }}
-                    onClick={() => {
-                      setSelectedFile(null);
-                      setValidationErrors([]);
-                      setSummary(null);
-                    }}
-                    disabled={submitting}
-                  >
-                    Clear
-                  </button>
+              {selectedFiles.length > 0 && (
+                <div className="mt-1 px-2 py-1 rounded-2" style={{ background: "#eef9ff", color: "#0f4f78", fontSize: "0.84rem" }}>
+                  <div className="d-flex align-items-center justify-content-between gap-2 flex-wrap">
+                    <span>
+                      Selected files: <strong>{selectedFiles.length}</strong>
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-secondary"
+                      style={{ padding: "2px 8px", fontSize: "0.74rem" }}
+                      onClick={() => {
+                        setSelectedFiles([]);
+                        setValidationErrors([]);
+                      }}
+                      disabled={submitting}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  <ul className="mb-0 mt-1 ps-3" style={{ maxHeight: "100px", overflowY: "auto" }}>
+                    {selectedFiles.map((file) => (
+                      <li key={`${file.name}-${file.size}-${file.lastModified}`}>
+                        {file.name} ({formatFileSize(file.size)})
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
             </div>
@@ -950,15 +998,6 @@ export default function BulkUploadModal({
             </div>
           )}
 
-          {summary && (
-            <div className="alert alert-success mb-0" role="alert">
-              <p className="fw-semibold mb-1">Upload completed</p>
-              <p className="mb-0">
-                Processed rows: {summary.totalRows} | Created records: {summary.createdCount}
-              </p>
-            </div>
-          )}
-
           <div className="d-flex justify-content-end gap-2 pt-0">
             <button type="button" className="btn btn-outline-danger" onClick={closeModal} disabled={submitting}>
               Cancel
@@ -968,9 +1007,9 @@ export default function BulkUploadModal({
               className="btn"
               style={{ background: "linear-gradient(135deg, #D8B200 0%, #f59e0b 100%)", color: "#1f2937", border: "none", fontWeight: "700", minWidth: "220px", letterSpacing: "0.01em", boxShadow: "0 6px 14px rgba(216,178,0,0.28)", transition: "all 0.22s cubic-bezier(0.22,1,0.36,1)" }}
               onClick={handleSubmit}
-              disabled={submitting || !selectedFile}
+              disabled={submitting || selectedFiles.length === 0}
             >
-              {submitting ? "Running validation and import..." : `Validate and Import ${content.entityName}`}
+              {submitting ? "Running validation and import..." : `Validate and Import ${content.entityName} from ${selectedFiles.length || 0} file(s)`}
             </button>
           </div>
         </div>
