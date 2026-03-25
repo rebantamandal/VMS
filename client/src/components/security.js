@@ -115,25 +115,6 @@ const getDailyPassEvents = (visitor) => (
   Array.isArray(visitor?.dailyPassEvents) ? visitor.dailyPassEvents : []
 );
 
-const formatDateKeyForIST = (dateKey) => {
-  if (!dateKey) return "";
-
-  const [yearText, monthText, dayText] = String(dateKey).split("-");
-  const year = Number.parseInt(yearText, 10);
-  const month = Number.parseInt(monthText, 10);
-  const day = Number.parseInt(dayText, 10);
-
-  if (!year || !month || !day) return dateKey;
-
-  const stableDate = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
-  return stableDate.toLocaleDateString("en-IN", {
-    timeZone: PASS_TRACKING_TIME_ZONE,
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-};
-
 const isLongPeriodVisit = (visitor) => {
   const startDateKey = getPassDateKey(visitor?.actualInTime || visitor?.inTime);
   const finalOutDateKey = getPassDateKey(visitor?.outTime);
@@ -188,8 +169,6 @@ const getPassTrackingMeta = (visitor, now = new Date()) => {
       summary: isCheckedOut
         ? "Visit completed and checked out."
         : "Long-period visit record",
-      todayLabel: isCheckedOut ? "Checked Out" : "Not Active",
-      nextIssueLabel: isCheckedOut ? "No action required" : "Check in to start daily pass flow",
       issueToday,
       returnToday,
     };
@@ -203,29 +182,18 @@ const getPassTrackingMeta = (visitor, now = new Date()) => {
       tone: "secondary",
       // Clarifies that pass actions are closed only after the visit window ends.
       summary: "Visit window ended. Complete final Check Out if still pending.",
-      todayLabel: "Past Final Day",
-      nextIssueLabel: "Complete final Check Out",
       issueToday,
       returnToday,
     };
   }
 
   if (returnToday) {
-    const tomorrowKey = getPassDateKey(new Date(now.getTime() + 24 * 60 * 60 * 1000));
-    const nextIssueAvailable = tomorrowKey && finalOutDateKey && tomorrowKey <= finalOutDateKey;
-
     return {
       enabled: true,
       canIssue: false,
       canReturn: false,
       tone: "success",
       summary: `Pass returned today at ${formatIST(returnToday.recordedAt)}.`,
-      todayLabel: "Pass Returned",
-      nextIssueLabel: isFinalDay
-        ? "Complete final Check Out now"
-        : nextIssueAvailable
-        ? `${formatDateKeyForIST(tomorrowKey)} (IST)`
-        : "No further pass issue required",
       issueToday,
       returnToday,
     };
@@ -240,8 +208,6 @@ const getPassTrackingMeta = (visitor, now = new Date()) => {
       summary: alertSentToday
         ? `Alert sent. Today's pass was issued at ${formatIST(issueToday.recordedAt)} and is still pending return.`
         : `Pass issued today at ${formatIST(issueToday.recordedAt)}. Awaiting return${isFinalDay ? " before checkout" : ""}.`,
-      todayLabel: isFinalDay ? "Issued, Return Required Today" : "Issued, Awaiting Return",
-      nextIssueLabel: isFinalDay ? "Return pass, then complete Check Out" : "Record pass return after collection",
       issueToday,
       returnToday,
     };
@@ -257,66 +223,9 @@ const getPassTrackingMeta = (visitor, now = new Date()) => {
         ? "Final day: issue today's pass, then return it and complete checkout."
         : "Ready to issue today's pass."
       : "Pass tracking becomes active only while the visitor is checked in during the visit window.",
-    todayLabel: trackingActive
-      ? isFinalDay
-        ? "Final Day - Not Issued"
-        : "Not Issued"
-      : "Not Active",
-    nextIssueLabel: trackingActive
-      ? isFinalDay
-        ? "Issue today's pass"
-        : `${formatDateKeyForIST(todayKey)} (IST)`
-      : "Check in to start daily pass flow",
     issueToday,
     returnToday,
   };
-};
-
-const getPassStatusStyles = (tone) => {
-  switch (tone) {
-    case "success":
-      return { background: "#ecfdf3", border: "1px solid #9dd7b5", color: "#146c43" };
-    case "warning":
-      return { background: "#fff8e1", border: "1px solid #f3d37a", color: "#8a5a00" };
-    case "danger":
-      return { background: "#fff1f1", border: "1px solid #ef9a9a", color: "#9f1d1d" };
-    case "primary":
-      return { background: "#eef4ff", border: "1px solid #9fc0ff", color: "#0d47a1" };
-    default:
-      return { background: "#f4f4f5", border: "1px solid #d4d4d8", color: "#3f3f46" };
-  }
-};
-
-const getPassStatusLabel = (meta) => {
-  if (!meta?.enabled) return "Standard Visit";
-  if (meta.tone === "success") return "Returned Today";
-  if (meta.tone === "warning") return "Pending Return";
-  if (meta.tone === "danger") return "Alert Raised";
-  if (meta.tone === "primary") return "Ready To Issue";
-  return "Long-Period Visit";
-};
-
-const getPassTodayLabel = (meta) => {
-  if (!meta?.enabled) return "Not Applicable";
-  if (meta.todayLabel) return meta.todayLabel;
-  if (meta.returnToday) return "Issued + Returned";
-  if (meta.issueToday) return "Issued, Awaiting Return";
-  return "Not Issued";
-};
-
-const getRepeatPrimaryAction = (visitor, passTracking) => {
-  // Guides guards with one clear next step for repeated checked-in records.
-  if (!visitor || visitor.status !== "checkedIn" || !isRepeatedVisitorType(visitor)) return null;
-
-  if (passTracking?.canIssue) {
-    return { kind: "issued", label: "Issue Pass", className: "btn btn-success btn-sm rounded-pill pass-action-btn" };
-  }
-
-  if (passTracking?.canReturn) {
-    return { kind: "returned", label: "Return Pass", className: "btn btn-danger btn-sm rounded-pill pass-action-btn" };
-  }
-
-  return null;
 };
 
 const isPassActionBusyForVisitor = (visitorId, passActionKey) => {
@@ -402,14 +311,10 @@ export default function Security() {
     return () => clearInterval(interval);
   }, []);
   // ✅ NEW: trigger rerender so overdue button appears when time passes
-  // -----------------changed by rebanta--------------
-  // Shortened tick interval from 30 s to 5 s so pass-day-boundary and overdue states update promptly
   useEffect(() => {
-  // Refreshes time-based pass state frequently enough to avoid day-boundary confusion around midnight.
-  const t = setInterval(() => setNowTick(Date.now()), 5000);
+  const t = setInterval(() => setNowTick(Date.now()), 30000);
   return () => clearInterval(t);
 }, []);
-  // -------------------------------------------------
 
 
   useEffect(() => {
@@ -418,10 +323,7 @@ export default function Security() {
 
     //--------------------------changed by rebanta------------------------------//
     // Explanation: Applies selected status to both on-screen list and export dataset.
-    if (statusFilter === "repeated") {
-      result = result.filter((v) => isRepeatedVisitorType(v));
-      exportResult = exportResult.filter((v) => isRepeatedVisitorType(v));
-    } else if (statusFilter !== "all") {
+    if (statusFilter !== "all") {
       result = result.filter((v) => v.status === statusFilter);
       exportResult = exportResult.filter((v) => v.status === statusFilter);
     }
@@ -934,25 +836,6 @@ const getConsentLabel = (v) => {
   return isGuestSource(v.source) ? "Guest's Consent:" : "Visitor's Consent:";
 };
 
-  // -----------------changed by rebanta--------------
-  // New: derived pass-tracking state for the active details modal — computed once per render
-  // so card and modal actions stay in sync without redundant utility calls
-  // Reuses the same derived details state across the modal instead of recomputing it inline.
-  const detailsNow = detailsVisitor ? new Date(nowTick) : null;
-  const detailsPassMeta = detailsVisitor ? getPassTrackingMeta(detailsVisitor, detailsNow) : null;
-  const detailsPassEvents = detailsVisitor ? getDailyPassEvents(detailsVisitor) : [];
-  const detailsIsRepeated = detailsVisitor ? isRepeatedVisitorType(detailsVisitor) : false;
-  const detailsIsFinalDay = detailsVisitor ? isFinalCheckoutDay(detailsVisitor, detailsNow) : false;
-  const detailsIsAfterFinalDay = detailsVisitor ? isAfterFinalCheckoutDay(detailsVisitor, detailsNow) : false;
-  const detailsIsBeforeFinalDay = detailsIsRepeated && !detailsIsFinalDay && !detailsIsAfterFinalDay;
-  const detailsPrimaryAction = detailsVisitor ? getRepeatPrimaryAction(detailsVisitor, detailsPassMeta) : null;
-  const detailsPassActionBusy = detailsVisitor
-    ? isPassActionBusyForVisitor(detailsVisitor._id, passActionKey)
-    : false;
-  const requirePassFlowBeforeFinalCheckout =
-    detailsIsRepeated && detailsIsFinalDay && !detailsPassMeta?.returnToday;
-  // -------------------------------------------------
-
 
   const exportToExcel = () => {
     //--------------------------changed by rebanta------------------------------//
@@ -1347,14 +1230,6 @@ const getConsentLabel = (v) => {
             Checked Out ({countVisitors.filter((v) => v.status === "checkedOut").length})
           </button>
           {/* -----------------changed by rebanta-------------- */}
-          {/* New filter tab: "Repeated" — shows only multi-day visitors/guests via isRepeatedVisitorType */}
-          <button
-            className={`btn btn-sm rounded-pill px-4 ${statusFilter === "repeated" ? "btn-info" : "btn-outline-info"}`}
-            onClick={() => setStatusFilter("repeated")}
-          >
-            Repeated ({countVisitors.filter((v) => isRepeatedVisitorType(v)).length})
-          </button>
-          {/* ------------------------------------------------- */}
           {/* info icon with tooltip explaining 7-day filter */}
           <span
             title="Only records checked out within the last 7 days are shown on screen. For older records, use Export to Excel."
@@ -1382,18 +1257,30 @@ const getConsentLabel = (v) => {
                 // Uses the shared time tick so date-based actions update consistently in the UI.
                 const guardNow = new Date(nowTick);
                 const passTracking = getPassTrackingMeta(v, guardNow);
-                const passStatusStyles = getPassStatusStyles(passTracking.tone);
-                const passStatusLabel = getPassStatusLabel(passTracking);
-                const passTodayLabel = getPassTodayLabel(passTracking);
                 const isRepeatedRecord = isRepeatedVisitorType(v);
-                const repeatPrimaryAction = getRepeatPrimaryAction(v, passTracking);
                 const isPassActionBusy = isPassActionBusyForVisitor(v._id, passActionKey);
                 // Final-day (after return) and post-final-day repeated records should be checkout-only.
                 const isFinalDayRepeated = isRepeatedRecord && isFinalCheckoutDay(v, guardNow);
                 const isAfterFinalDayRepeated = isRepeatedRecord && isAfterFinalCheckoutDay(v, guardNow);
-                const showOnlyCheckout =
-                  (isFinalDayRepeated && Boolean(passTracking.returnToday)) ||
-                  isAfterFinalDayRepeated;
+                const canFinalizeRepeatedToday =
+                  isFinalDayRepeated && (!passTracking.issueToday || Boolean(passTracking.returnToday));
+                const showOnlyCheckout = canFinalizeRepeatedToday || isAfterFinalDayRepeated;
+                const basicJourneyEnabled = !passTracking.enabled && v.source !== "adhoc";
+                const basicCanAuthorize = basicJourneyEnabled && v.status === "new";
+                const basicStep1State = v.status === "new" ? "next-slate" : "done-slate";
+                const basicStep2State = v.status === "checkedIn" ? "current-teal" : v.status === "checkedOut" ? "done-teal" : "idle";
+                const basicCanCheckout = basicJourneyEnabled && v.status === "checkedIn";
+                const basicStep3State = v.status === "checkedOut" ? "final-dark" : basicCanCheckout ? "next-checkout" : "idle";
+                const basicStep1Label = basicCanAuthorize ? "Authorize" : "Authorized";
+                const basicStep3Label = v.status === "checkedOut" ? "Complete" : "Check-Out";
+                const basicAccentColor =
+                  v.status === "checkedOut" ? "#f59e0b" : v.status === "checkedIn" ? "#14b8a6" : "#64748b";
+                const basicSummary =
+                  v.status === "checkedOut"
+                    ? "Visit completed successfully."
+                    : v.status === "checkedIn"
+                      ? "Visitor is currently on site."
+                      : "Use Authorize to approve and capture consent before check-in.";
                 // -------------------------------------------------
 
                 return (
@@ -1405,7 +1292,7 @@ const getConsentLabel = (v) => {
                   transition={{ delay: i * 0.1 }}
                 >
                   <div
-                    className="card shadow-lg border-0 p-4 rounded-4 fancy-card"
+                    className="card shadow-lg border-0 p-4 rounded-4 fancy-card visitor-info-card"
                     style={{
                       background: "#F2F2F2",
                       backdropFilter: "blur(10px)",
@@ -1430,202 +1317,255 @@ const getConsentLabel = (v) => {
                       <FaUser className="me-2" />
                       {v.firstName} {v.lastName}
                     </h4>
-                    {/* -----------------changed by rebanta-------------- */}
-                    {/* New: badge chip identifying multi-day visitors and guests on the card */}
-                    {isRepeatedRecord && (
-                      <div className="text-center mb-2">
-                        <span className="repeated-visit-chip">Repeated Visitor/Guest</span>
+                    <div className="visitor-meta">
+                      <p className="visitor-meta-row">
+                        <FaBuilding className="me-2" />
+                        <b>Category: {v.category || "-"}</b>
+                      </p>
+                      <p className="visitor-meta-row">
+                        <FaUser className="me-2" />
+                        <b>Host:</b> {v.host || "-"}
+                      </p>
+                      <p className="visitor-meta-row">
+                        <FaQuestion className="me-2" />
+                        <b>Purpose:</b> {v.purposeOfVisit || "-"}
+                      </p>
+                      <p className="visitor-meta-row">
+                        <FaMapMarkerAlt className="me-2 text-danger" />
+                        <b>Company:</b> {v.company || "-"}
+                      </p>
+                      <p className="visitor-meta-row">
+                        <FaIdBadge className="me-2" />
+                        <b>Visitor ID:</b> {v.cardNo || "-"}
+                      </p>
+                      <p className="visitor-meta-row">
+                        <FaClock className="me-2 text-info" />
+                        <b>Tentative In:</b> {v.inTime ? new Date(v.inTime).toLocaleString() : "-"}
+                      </p>
+                      <p className="visitor-meta-row">
+                        <FaClock className="me-2 text-info" />
+                        <b>Tentative Out:</b> {v.outTime ? new Date(v.outTime).toLocaleString() : "-"}
+                      </p>
+                      <p className="visitor-meta-row">
+                        <FaClock className="me-2 text-success" />
+                        <b>Actual Check-In:</b> {v.actualInTime ? new Date(v.actualInTime).toLocaleString() : "-"}
+                      </p>
+                      <p className="visitor-meta-row visitor-status-row">
+                        <b>Status:</b> <span className="badge bg-dark rounded-pill px-3">{v.status?.toUpperCase()}</span>
+                      </p>
+                    </div>
+
+                    {basicJourneyEnabled && (
+                      <div className="visit-stage-wrapper mb-3" style={{ borderLeftColor: basicAccentColor }}>
+                        <div className="pass-track-eyebrow">Visit Journey</div>
+                        <div className="pass-step-rail visit-step-rail">
+                          <div className="pass-step-col">
+                            <div
+                              className={`pass-step-circle ${basicStep1State === "done-slate" ? "psc-done-slate" : "psc-next-slate"} ${basicCanAuthorize ? "pass-step-circle-actionable" : ""}`}
+                              onClick={basicCanAuthorize ? () => openConsent(v) : undefined}
+                              title={basicCanAuthorize ? "Authorize" : undefined}
+                              style={{ cursor: basicCanAuthorize ? "pointer" : "default" }}
+                            >
+                              1
+                            </div>
+                            <div className="pass-step-lbl pass-step-lbl-await">{basicStep1Label}</div>
+                          </div>
+                          <div className={`pass-step-line ${v.status !== "new" ? "psl-slate" : "psl-idle"}`} />
+                          <div className="pass-step-col">
+                            <div className={`pass-step-circle ${basicStep2State === "current-teal" ? "psc-current-teal" : basicStep2State === "done-teal" ? "psc-done-teal" : "psc-idle"}`}>
+                              2
+                            </div>
+                            <div className="pass-step-lbl pass-step-lbl-onsite">Checked In</div>
+                          </div>
+                          <div className={`pass-step-line ${v.status === "checkedOut" ? "psl-teal" : "psl-idle"}`} />
+                          <div className="pass-step-col">
+                            <div
+                              className={`pass-step-circle ${basicStep3State === "final-dark" ? "psc-final-dark" : basicStep3State === "next-checkout" ? "psc-next-checkout" : "psc-idle"} ${basicCanCheckout ? "pass-step-circle-actionable" : ""}`}
+                              onClick={basicCanCheckout ? () => openCheckout(v) : undefined}
+                              title={basicCanCheckout ? "Check-Out" : undefined}
+                              style={{ cursor: basicCanCheckout ? "pointer" : "default" }}
+                            >
+                              {v.status === "checkedOut" ? "✓" : "3"}
+                            </div>
+                            <div className="pass-step-lbl pass-step-lbl-closed">{basicStep3Label}</div>
+                          </div>
+                        </div>
+                        <div className="pass-step-summary">
+                          <span className="pass-summary-dot visitor-summary-dot-basic" />
+                          {basicSummary}
+                        </div>
                       </div>
                     )}
-                    {/* ------------------------------------------------- */}
-                    <p>
-                      <FaBuilding className="me-2" />
-                      <b>Category: {v.category || "-"}</b> 
-                    </p>
-                    <p>
-                      <FaUser className="me-2" />
-                      <b>Host:</b> {v.host || "-"}
-                    </p>
-                    <p>
-                      <FaQuestion className="me-2" />
-                      <b>Purpose:</b> {v.purposeOfVisit || "-"}
-                    </p>
-                    <p>
-                      <FaMapMarkerAlt className="me-2 text-danger" />
-                      <b>Company:</b> {v.company || "-"}
-                    </p>
 
-                    <p>
-                      <FaIdBadge className="me-2" />
-                      <b>Visitor ID:</b> {v.cardNo || "-"}
-                    </p>
-                    <p>
-                      <FaClock className="me-2 text-info" />
-                      <b>Tentative In:</b> {v.inTime ? new Date(v.inTime).toLocaleString() : "-"}
-                    </p>
-                    <p>
-                      <FaClock className="me-2 text-info" />
-                      <b>Tentative Out:</b> {v.outTime ? new Date(v.outTime).toLocaleString() : "-"}
-                    </p>
-                    <p>
-                      <FaClock className="me-2 text-success" />
-                      <b>Actual Check-In:</b> {v.actualInTime ? new Date(v.actualInTime).toLocaleString() : "-"}
-                    </p>
-                    <p>
-                      <b>Status:</b> <span className="badge bg-dark rounded-pill px-3">{v.status?.toUpperCase()}</span>
-                    </p>
+                    {passTracking.enabled && (() => {
+                      const startKey = getPassDateKey(v.actualInTime || v.inTime);
+                      const endKey = getPassDateKey(v.outTime);
+                      const todayKey = getPassDateKey(guardNow);
+                      let arcDayN = 1, arcTotal = 1;
+                      if (startKey && endKey) {
+                        const msPerDay = 86400000;
+                        const startMs = new Date(startKey + "T12:00:00Z").getTime();
+                        const endMs = new Date(endKey + "T12:00:00Z").getTime();
+                        const todayMs = new Date(todayKey + "T12:00:00Z").getTime();
+                        arcTotal = Math.max(1, Math.round((endMs - startMs) / msPerDay) + 1);
+                        arcDayN = Math.max(1, Math.min(Math.round((todayMs - startMs) / msPerDay) + 1, arcTotal));
+                      }
+                      const R = 20, cx = 26, cy = 26;
+                      const circ = 2 * Math.PI * R;
+                      const arcFilled = circ * Math.min(arcDayN / arcTotal, 1);
 
-                    {/* -----------------changed by rebanta-------------- */}
-                    {/* New: per-card daily pass tracking panel — status chip, summary text,
-                        today's pass label, next-issue date, and visit window for multi-day records */}
-                    {passTracking.enabled && (
-                      <div className="pass-panel rounded-3 p-3 mb-3" style={passStatusStyles}>
-                        <div className="pass-panel-header mb-2">
-                          <div className="fw-semibold">Daily Pass Tracking</div>
-                          <span className={`pass-status-chip pass-status-${passTracking.tone || "secondary"}`}>
-                            {passStatusLabel}
-                          </span>
-                        </div>
+                      const isFirstDay = arcDayN === 1;
+                      const isAuthorizeMode = isFirstDay && v.status === "new";
+                      const step1State = passTracking.issueToday
+                        ? "done"
+                        : isAuthorizeMode
+                          ? "next-slate"
+                          : passTracking.canIssue
+                            ? "next-issue"
+                            : "idle";
+                      const step2State = passTracking.returnToday ? "done" : passTracking.canReturn ? "next-return" : "idle";
+                      const conn1Done = Boolean(passTracking.issueToday);
+                      const conn2Done = Boolean(passTracking.returnToday);
+                      const isFinalDayNow = isFinalCheckoutDay(v, guardNow);
+                      const canCheckoutFromPassRail = showOnlyCheckout && v.status === "checkedIn";
+                      const step3State = canCheckoutFromPassRail
+                        ? "next-checkout"
+                        : conn2Done
+                          ? (isFinalDayNow ? "final" : "done")
+                          : "upcoming";
+                      const step3Label = canCheckoutFromPassRail ? "Check-Out" : (isFinalDayNow ? "Complete" : "Next Day");
+                      const accentColor =
+                        canCheckoutFromPassRail || step3State === "final"
+                          ? "#f59e0b"
+                          : step2State === "next-return" || step2State === "done"
+                            ? "#f59e0b"
+                            : step3State === "done"
+                              ? "#14b8a6"
+                              : "#64748b";
 
-                        <div className="small pass-summary-text">{passTracking.summary}</div>
-
-                        <div className="pass-mini-grid mt-2">
-                          <div className="pass-mini-card">
-                            <div className="pass-mini-label">Today's Status</div>
-                            <div className="pass-mini-value">{passTodayLabel}</div>
+                      return (
+                        <div className="pass-track-wrapper mb-3" style={{ borderLeftColor: accentColor }}>
+                          <div className="pass-arc-ring">
+                            <svg width="52" height="52" viewBox="0 0 52 52" aria-label={`Day ${arcDayN} of ${arcTotal}`}>
+                              <circle cx={cx} cy={cy} r={R} fill="none" stroke="#e2e8f0" strokeWidth="3.5" />
+                              <circle
+                                cx={cx}
+                                cy={cy}
+                                r={R}
+                                fill="none"
+                                stroke={accentColor}
+                                strokeWidth="3.5"
+                                strokeDasharray={`${arcFilled} ${circ}`}
+                                strokeLinecap="round"
+                                transform={`rotate(-90 ${cx} ${cy})`}
+                              />
+                              <text x={cx} y={cy - 4} textAnchor="middle" dominantBaseline="middle" fontSize="12" fontWeight="800" fill="#1e293b">
+                                {arcDayN}
+                              </text>
+                              <text x={cx} y={cy + 8} textAnchor="middle" dominantBaseline="middle" fontSize="7.5" fontWeight="500" fill="#64748b">
+                                of {arcTotal}
+                              </text>
+                            </svg>
+                            <div className="pass-arc-label">Day</div>
                           </div>
-                          <div className="pass-mini-card">
-                            <div className="pass-mini-label">Next Issue</div>
-                            <div className="pass-mini-value">{passTracking.nextIssueLabel || "Will appear automatically"}</div>
+
+                          <div className="pass-track-eyebrow">Daily Pass</div>
+
+                          <div className="pass-step-rail">
+                            <div className="pass-step-col">
+                              <div
+                                className={`pass-step-circle ${step1State === "done" ? "psc-done psc-issue-node" : step1State === "next-slate" ? "psc-next-slate pass-step-circle-actionable" : `psc-${step1State} psc-issue-node`} ${step1State === "next-issue" ? "pass-step-circle-actionable" : ""}`}
+                                onClick={
+                                  step1State === "next-slate"
+                                    ? () => openConsent(v)
+                                    : step1State === "next-issue" && !isPassActionBusy
+                                      ? () => recordDailyPassEvent(v, "issued")
+                                      : undefined
+                                }
+                                title={step1State === "next-slate" ? "Authorize" : step1State === "next-issue" ? "Issue Pass" : undefined}
+                                style={{ cursor: (step1State === "next-slate" || step1State === "next-issue") ? "pointer" : "default" }}
+                              >
+                                {step1State === "done" ? "✓" : "1"}
+                              </div>
+                              <div className="pass-step-lbl pass-step-lbl-issue">{isAuthorizeMode ? "Authorize" : "Issue"}</div>
+                            </div>
+                            <div className={`pass-step-line ${conn1Done ? "psl-done psl-after-issue" : "psl-idle"}`} />
+
+                            <div className="pass-step-col">
+                              <div
+                                className={`pass-step-circle psc-${step2State} psc-return-node ${step2State === "next-return" ? "pass-step-circle-actionable" : ""}`}
+                                onClick={step2State === "next-return" && !isPassActionBusy ? () => recordDailyPassEvent(v, "returned") : undefined}
+                                title={step2State === "next-return" ? "Return Pass" : undefined}
+                                style={{ cursor: step2State === "next-return" ? "pointer" : "default" }}
+                              >
+                                {step2State === "done" ? "✓" : "2"}
+                              </div>
+                              <div className="pass-step-lbl pass-step-lbl-return">Return</div>
+                            </div>
+                            <div className={`pass-step-line ${conn2Done ? "psl-done psl-after-return" : "psl-idle"}`} />
+
+                            <div className="pass-step-col">
+                              <div
+                                className={`pass-step-circle psc-${step3State} psc-next-node ${canCheckoutFromPassRail ? "pass-step-circle-actionable" : ""}`}
+                                onClick={canCheckoutFromPassRail ? () => openCheckout(v) : undefined}
+                                title={canCheckoutFromPassRail ? "Check-Out" : undefined}
+                                style={{ cursor: canCheckoutFromPassRail ? "pointer" : "default" }}
+                              >
+                                {step3State === "done" || step3State === "final" ? "✓" : "→"}
+                              </div>
+                              <div className="pass-step-lbl pass-step-lbl-next">{step3Label}</div>
+                            </div>
+                          </div>
+
+                          <div className="pass-step-summary">
+                            <span className="pass-summary-dot" style={{ background: accentColor }} />
+                            {passTracking.summary}
                           </div>
                         </div>
-                        <div className="small mt-1">
-                          <b>Visit Window:</b> {formatIST(v.inTime)} to {formatIST(v.outTime)}
-                        </div>
-                      </div>
-                    )}
-                    {/* ------------------------------------------------- */}
+                      );
+                    })()}
 
                     {v.displaySignature && (
-                      <div className="text-center my-2">
-                        <img src={v.displaySignature} alt="signature" width={150} className="border rounded p-2" />
-                        <p className="text-success small">✔ Signed (Encrypted)</p>
+                      <div className="signature-block">
+                        <img src={v.displaySignature} alt="signature" width={150} className="signature-preview" />
+                        <p className="signature-caption">✔ Signed (Encrypted)</p>
                       </div>
                     )}
 
                     {v.status === "new" && (
-  <div className="text-center d-flex justify-content-center gap-2 flex-wrap">
-    <button className="btn btn-dark btn-sm rounded-pill" onClick={() => openConsent(v)}>
-      Authorize
-    </button>
-    {/*----------------------------------Changes by Anup----------------------------------------------------------------------- */}
-    <button className="btn btn-outline-dark btn-sm rounded-pill" onClick={() => openDetails(v)}>
-      View Details   {/*This is what the user will see on the cards of the security page */}
-    </button>
-    {/*----------------------------------Changes by Anup----------------------------------------------------------------------- */}
+                      <div className="text-center d-flex justify-content-center gap-2 flex-wrap card-action-row">
+                        <button className="btn btn-dark btn-sm rounded-pill" onClick={() => openConsent(v)}>
+                          Authorize
+                        </button>
+                        <button className="btn btn-outline-dark btn-sm rounded-pill" onClick={() => openDetails(v)}>
+                          View Details
+                        </button>
+                        {isOverdue24Hours(v) && (
+                          <button
+                            className="btn btn-danger btn-sm rounded-pill"
+                            onClick={() => removeFromUI(v)}
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                    )}
 
-
-    {/* ✅ NEW: show Remove only if overdue */}
-    {isOverdue24Hours(v) && (
-      <button
-        className="btn btn-danger btn-sm rounded-pill"
-        onClick={() => removeFromUI(v)}
-      >
-        Remove
-      </button>
-    )}
-  </div>
-)}
-
-
-                    {/* -----------------changed by rebanta-------------- */}
-                    {/* Redesigned: repeated visitors get Issue/Return Pass + showOnlyCheckout guard;
-                        non-repeated get Edit Badge, optional Issue/Return Pass, Print, View Details, Check Out */}
                     {v.status === "checkedIn" && (
-                      <div className="d-flex justify-content-center gap-2 mt-3 flex-wrap action-row-modern">
-                        {isRepeatedRecord ? (
-                          showOnlyCheckout ? (
-                          <>
-                            <button className="btn btn-outline-dark btn-sm rounded-pill" onClick={() => openDetails(v)}>
-                              {/* Keep View Details always available, including checkout-only state. */}
-                              View Details
-                            </button>
-                            <button className="btn btn-warning btn-sm rounded-pill" onClick={() => openCheckout(v)}>
-                              {/* On final day after return, enforce checkout-only action on card. */}
-                              Check Out
-                            </button>
-                          </>
-                          ) : (
-                            <>
-                              <button className="btn btn-outline-primary btn-sm rounded-pill" onClick={() => handleBadgeEditOpen(v)}>
-                                <FaEdit className="me-1" /> Edit Badge
-                              </button>
-                              {repeatPrimaryAction?.kind === "issued" && (
-                                <button
-                                  className={repeatPrimaryAction.className}
-                                  onClick={() => recordDailyPassEvent(v, "issued")}
-                                  disabled={isPassActionBusy}
-                                >
-                                  {repeatPrimaryAction.label}
-                                </button>
-                              )}
-                              {repeatPrimaryAction?.kind === "returned" && (
-                                <button
-                                  className={repeatPrimaryAction.className}
-                                  onClick={() => recordDailyPassEvent(v, "returned")}
-                                  disabled={isPassActionBusy}
-                                >
-                                  {repeatPrimaryAction.label}
-                                </button>
-                              )}
-                              <button className="btn btn-outline-dark btn-sm rounded-pill" onClick={() => printCard(v)}>
-                                <FaPrint className="me-1" /> Print Card
-                              </button>
-                              <button className="btn btn-outline-dark btn-sm rounded-pill" onClick={() => openDetails(v)}>
-                                View Details
-                              </button>
-                            </>
-                          )
-                        ) : (
-                          <>
-                            <button className="btn btn-outline-primary btn-sm rounded-pill" onClick={() => handleBadgeEditOpen(v)}>
-                              <FaEdit className="me-1" /> Edit Badge
-                            </button>
-                            {passTracking.enabled && passTracking.canIssue && v.source !== "adhoc" && (
-                              <button
-                                className="btn btn-success btn-sm rounded-pill pass-action-btn"
-                                onClick={() => recordDailyPassEvent(v, "issued")}
-                                disabled={isPassActionBusy}
-                              >
-                                Issue Pass
-                              </button>
-                            )}
-                            {passTracking.enabled && passTracking.canReturn && v.source !== "adhoc" && (
-                              <button
-                                className="btn btn-danger btn-sm rounded-pill pass-action-btn"
-                                onClick={() => recordDailyPassEvent(v, "returned")}
-                                disabled={isPassActionBusy}
-                              >
-                                Return Pass
-                              </button>
-                            )}
-                            <button className="btn btn-outline-dark btn-sm rounded-pill" onClick={() => printCard(v)}>
-                              <FaPrint className="me-1" /> Print Card
-                            </button>
-
-                            {/*----------------------------------Changes by Anup----------------------------------------------------------------------- */}
-                            <button className="btn btn-outline-dark btn-sm rounded-pill" onClick={() => openDetails(v)}>
-                              View Details   {/*This is what the user will see on the cards of the security page */}
-                            </button>
-                            {/*----------------------------------Changes by Anup----------------------------------------------------------------------- */}
-
-                            {(!isRepeatedRecord || isFinalCheckoutDay(v)) && (
-                              <button className="btn btn-warning btn-sm rounded-pill" onClick={() => openCheckout(v)}>
-                                {/* Keep direct checkout on card for non-repeated visits and final-day repeated visits. */}
-                                Check Out
-                              </button>
-                            )}
-                          </>
+                      <div className="d-flex justify-content-center gap-2 flex-wrap card-action-row">
+                        <button className="btn btn-outline-primary btn-sm rounded-pill" onClick={() => handleBadgeEditOpen(v)}>
+                          <FaEdit className="me-1" /> Edit Badge
+                        </button>
+                        <button className="btn btn-outline-dark btn-sm rounded-pill" onClick={() => printCard(v)}>
+                          <FaPrint className="me-1" /> Print Card
+                        </button>
+                        <button className="btn btn-outline-dark btn-sm rounded-pill" onClick={() => openDetails(v)}>
+                          View Details
+                        </button>
+                        {isRepeatedRecord && showOnlyCheckout && (
+                          <button className="btn btn-warning btn-sm rounded-pill" onClick={() => openCheckout(v)}>
+                            Check Out
+                          </button>
                         )}
                       </div>
                     )}
@@ -1978,8 +1918,8 @@ const getConsentLabel = (v) => {
               <div className="modal-content p-4 rounded-4">
 
                 <h3 className="text-center fw-bold mb-4">
-                  {detailsVisitor?.source === "guest" ? "Guest Details" : detailsVisitor?.source === "adhoc" ? "Adhoc Visitor Details" : "Visitor Details"}
-                </h3> {/* this is used to figure out what type of visitor is */}
+                    {detailsVisitor?.source === "guest" ? "Guest Details" : detailsVisitor?.source === "adhoc" ? "Adhoc Visitor Details" : "Visitor Details"}
+                  </h3>
 
                 <div className="row">
 
@@ -2025,141 +1965,10 @@ const getConsentLabel = (v) => {
                     <b>Guest WiFi Required:</b><br />
                     {detailsVisitor.guestWifiRequired ? "Yes" : "No"}
                   </div>
-
-                  {/* -----------------changed by rebanta-------------- */}
-                  {/* Pass history section: groups issue+return pairs into cycle rows shown as a table */}
-                  {detailsVisitor.source !== "adhoc" && isLongPeriodVisit(detailsVisitor) && (
-                    <div className="col-12 mt-3">
-                      <div className="border rounded-3 p-3" style={{ background: "#f8f9fa" }}>
-                        <div className="fw-bold mb-2">Pass History</div>
-                        {detailsPassEvents.length === 0 ? (
-                          <div className="small text-muted">No daily pass actions recorded yet.</div>
-                        ) : (() => {
-                          // Group events by dateKey, pair issue+return into cycle rows
-                          const byDate = {};
-                          detailsPassEvents.forEach((ev) => {
-                            if (!byDate[ev.dateKey]) byDate[ev.dateKey] = [];
-                            byDate[ev.dateKey].push(ev);
-                          });
-
-                          const rows = [];
-                          Object.keys(byDate)
-                            .sort((a, b) => (a < b ? -1 : 1))
-                            .forEach((dateKey) => {
-                              const events = byDate[dateKey];
-                              const issues = events
-                                .filter((e) => e.action === "issued")
-                                .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
-                              const returns = events
-                                .filter((e) => e.action === "returned")
-                                .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
-                              const cycleCount = Math.max(issues.length, returns.length);
-                              for (let c = 0; c < cycleCount; c++) {
-                                rows.push({
-                                  dateKey,
-                                  cycle: c + 1,
-                                  issuedAt: issues[c]?.recordedAt || null,
-                                  returnedAt: returns[c]?.recordedAt || null,
-                                });
-                              }
-                            });
-
-                          // Reverse so newest cycle is first
-                          rows.reverse();
-
-                          return (
-                            <div style={{ overflowX: "auto" }}>
-                              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
-                                <thead>
-                                  <tr style={{ background: "#e9ecef", textAlign: "left" }}>
-                                    <th style={{ padding: "8px 12px", borderBottom: "2px solid #dee2e6", whiteSpace: "nowrap" }}>Date</th>
-                                    <th style={{ padding: "8px 12px", borderBottom: "2px solid #dee2e6" }}>Cycle</th>
-                                    <th style={{ padding: "8px 12px", borderBottom: "2px solid #dee2e6", whiteSpace: "nowrap" }}>Issued At</th>
-                                    <th style={{ padding: "8px 12px", borderBottom: "2px solid #dee2e6", whiteSpace: "nowrap" }}>Returned At</th>
-                                    <th style={{ padding: "8px 12px", borderBottom: "2px solid #dee2e6" }}>Status</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {rows.map((row, idx) => (
-                                    <tr key={`${row.dateKey}-${row.cycle}`} style={{ background: idx % 2 === 0 ? "#fff" : "#f8f9fa", borderBottom: "1px solid #dee2e6" }}>
-                                      <td style={{ padding: "7px 12px", whiteSpace: "nowrap" }}>{row.dateKey}</td>
-                                      <td style={{ padding: "7px 12px" }}>{row.cycle}</td>
-                                      <td style={{ padding: "7px 12px", whiteSpace: "nowrap" }}>{row.issuedAt ? formatIST(row.issuedAt) : "-"}</td>
-                                      <td style={{ padding: "7px 12px", whiteSpace: "nowrap" }}>{row.returnedAt ? formatIST(row.returnedAt) : "-"}</td>
-                                      <td style={{ padding: "7px 12px" }}>
-                                        <span style={{
-                                          display: "inline-block",
-                                          padding: "2px 10px",
-                                          borderRadius: "20px",
-                                          fontSize: "0.78rem",
-                                          fontWeight: 600,
-                                          background: row.returnedAt ? "#1e293b" : "#fef9c3",
-                                          color: row.returnedAt ? "#f8fafc" : "#713f12",
-                                          border: row.returnedAt ? "none" : "1px solid #fde68a",
-                                        }}>
-                                          {row.returnedAt ? "Returned" : "Issued"}
-                                        </span>
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    </div>
-                  )}
-                  {/* ------------------------------------------------- */}
-
-
                   
                 </div>
 
-                {/* -----------------changed by rebanta-------------- */}
-                {/* Redesigned details modal footer: Issue Pass, Return Pass, Optional/Final
-                    Check Out (blocked until pass returned on final day), and Close button */}
-                <div className="text-center mt-4 d-flex justify-content-center gap-2 flex-wrap">
-                  {detailsVisitor.status === "checkedIn" && (
-                    <>
-                      {detailsPrimaryAction?.kind === "issued" && (
-                        <button
-                          className="btn btn-success rounded-pill px-4"
-                          onClick={() => recordDailyPassEvent(detailsVisitor, "issued")}
-                          disabled={detailsPassActionBusy}
-                        >
-                          {/* Mirrors the single next-step action inside details modal. */}
-                          Issue Pass
-                        </button>
-                      )}
-                      {detailsPrimaryAction?.kind === "returned" && (
-                        <button
-                          className="btn btn-danger rounded-pill px-4"
-                          onClick={() => recordDailyPassEvent(detailsVisitor, "returned")}
-                          disabled={detailsPassActionBusy}
-                        >
-                          Return Pass
-                        </button>
-                      )}
-                      <button
-                        className="btn btn-warning rounded-pill px-4"
-                        disabled={requirePassFlowBeforeFinalCheckout}
-                        title={
-                          requirePassFlowBeforeFinalCheckout
-                            ? "Complete today's Issue Pass and Return Pass before final checkout"
-                            : detailsIsBeforeFinalDay
-                              ? "Optional until the final day"
-                              : "Proceed to checkout"
-                        }
-                        onClick={() => {
-                          setShowDetails(false);
-                          openCheckout(detailsVisitor);
-                        }}
-                      >
-                        {detailsIsBeforeFinalDay ? "Optional Check Out" : "Check Out"}
-                      </button>
-                    </>
-                  )}
+                <div className="text-center mt-4">
                   <button
                     className="btn btn-dark rounded-pill px-4"
                     onClick={() => setShowDetails(false)} 
@@ -2167,7 +1976,6 @@ const getConsentLabel = (v) => {
                     Close
                   </button>
                 </div>
-                {/* ------------------------------------------------- */}
 
               </div>
             </div>
@@ -2188,109 +1996,324 @@ const getConsentLabel = (v) => {
           transform: translateY(-8px);
           box-shadow: 0 14px 28px rgba(0, 0, 0, 0.3);
         }
-        /* -----------------changed by rebanta-------------- */
-        /* New CSS: repeated-visit-chip badge, pass panel (pass-panel, pass-panel-header,
-           pass-summary-text, pass-status-chip variants), pass-mini-grid card layout,
-           action-row-modern divider, and pass-action-btn — all for the daily pass feature */
-        .repeated-visit-chip {
-          display: inline-block;
-          font-size: 0.74rem;
-          font-weight: 700;
-          letter-spacing: 0.2px;
-          border: 1px solid #74b9ff;
-          color: #0b4f8a;
-          background: #edf6ff;
-          border-radius: 999px;
-          padding: 3px 10px;
+        .pass-track-wrapper {
+          position: relative;
+          background: #ffffff;
+          border: 1px solid #dbe3ee;
+          border-left-width: 4px;
+          border-left-style: solid;
+          border-radius: 12px;
+          padding: 12px 14px 10px 14px;
+          box-shadow: 0 2px 6px rgba(15,23,42,0.04);
+          overflow: hidden;
         }
-        .pass-panel {
-          box-shadow: 0 8px 16px rgba(2, 6, 23, 0.08);
+        .pass-track-wrapper::after {
+          display: none;
         }
-        .pass-panel-header {
+        .pass-arc-ring {
+          position: absolute;
+          top: 10px;
+          right: 10px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          z-index: 1;
+        }
+        .pass-arc-label {
+          font-size: 0.6rem;
+          font-weight: 800;
+          color: #64748b;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          margin-top: 1px;
+        }
+        .pass-track-eyebrow {
+          font-size: 0.58rem;
+          font-weight: 800;
+          letter-spacing: 1px;
+          text-transform: uppercase;
+          color: #94a3b8;
+          margin-bottom: 8px;
+          padding-right: 64px;
+        }
+        /* Step rail */
+        .pass-step-rail {
           display: flex;
           align-items: center;
-          justify-content: space-between;
-          gap: 8px;
+          justify-content: flex-start;
+          padding-right: 64px;
+          padding-bottom: 0;
         }
-        .pass-summary-text {
-          line-height: 1.45;
+        .pass-step-col {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 5px;
+          min-height: 62px;
         }
-        .pass-status-chip {
-          font-size: 0.68rem;
+        .pass-step-circle {
+          width: 36px;
+          height: 36px;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 13px;
           font-weight: 700;
-          padding: 4px 10px;
-          border-radius: 999px;
-          border: 1px solid transparent;
-          white-space: nowrap;
+          border: 2px solid;
+          flex-shrink: 0;
+          transition: box-shadow 0.18s, transform 0.18s, border-color 0.18s;
+          user-select: none;
         }
-        .pass-status-success {
-          color: #0f5132;
-          background: rgba(16, 185, 129, 0.15);
-          border-color: rgba(16, 185, 129, 0.45);
+        .pass-step-circle:hover {
+          transform: none;
         }
-        .pass-status-warning {
-          color: #7a4b00;
-          background: rgba(251, 191, 36, 0.2);
-          border-color: rgba(251, 191, 36, 0.45);
+        .pass-step-circle-actionable {
+          box-shadow: none;
         }
-        .pass-status-danger {
-          color: #9f1239;
-          background: rgba(244, 63, 94, 0.15);
-          border-color: rgba(244, 63, 94, 0.45);
+        .psc-idle {
+          background: #f8fafc;
+          border-color: #e2e8f0;
+          color: #cbd5e1;
         }
-        .pass-status-primary {
-          color: #1d4ed8;
-          background: rgba(59, 130, 246, 0.15);
-          border-color: rgba(59, 130, 246, 0.45);
+        .psc-upcoming {
+          background: #ffffff;
+          border: 2px dashed #94a3b8;
+          color: #64748b;
+          box-shadow: none;
         }
-        .pass-status-secondary {
-          color: #52525b;
-          background: rgba(161, 161, 170, 0.15);
-          border-color: rgba(161, 161, 170, 0.45);
+        .psc-next-issue {
+          background: #ffffff;
+          border-color: #475569;
+          color: #334155;
+          animation: pscPulseSlate 1.85s ease-out infinite;
         }
-        .pass-mini-grid {
-          display: grid;
-          grid-template-columns: 1fr;
-          gap: 8px;
+        .psc-next-return {
+          background: #ffffff;
+          border-color: #f59e0b;
+          color: #d97706;
+          animation: pscPulseAmber 1.85s ease-out infinite;
         }
-        .pass-mini-card {
-          background: rgba(255, 255, 255, 0.65);
-          border: 1px solid rgba(15, 23, 42, 0.12);
-          border-radius: 10px;
-          padding: 8px 10px;
+        .psc-next-checkout {
+          background: #ffffff;
+          border-color: #f59e0b;
+          color: #d97706;
+          animation: pscPulseYellow 1.85s ease-out infinite;
         }
-        .pass-mini-label {
-          font-size: 0.66rem;
+        .psc-done {
+          background: #64748b;
+          border-color: #64748b;
+          color: #fff;
+          box-shadow: none;
+        }
+        .psc-issue-node.psc-done {
+          background: #64748b;
+          border-color: #64748b;
+          box-shadow: none;
+        }
+        .psc-return-node.psc-done {
+          background: #f59e0b;
+          border-color: #d97706;
+          box-shadow: none;
+        }
+        .psc-next-node.psc-done {
+          background: #2dd4bf;
+          border-color: #14b8a6;
+          box-shadow: none;
+        }
+        .psc-final {
+          background: #facc15;
+          border-color: #f59e0b;
+          color: #713f12;
+          box-shadow: none;
+        }
+        @keyframes pscPulseIndigo {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(99,102,241,0.5); }
+          50%       { box-shadow: 0 0 0 9px rgba(99,102,241,0); }
+        }
+        @keyframes pscPulseAmber {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.5); }
+          50%       { box-shadow: 0 0 0 9px rgba(245,158,11,0); }
+        }
+        @keyframes pscPulseYellow {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(250,204,21,0.55); }
+          50%       { box-shadow: 0 0 0 10px rgba(250,204,21,0); }
+        }
+        .pass-step-lbl {
+          font-size: 0.58rem;
           font-weight: 700;
-          letter-spacing: 0.24px;
+          color: #94a3b8;
+          letter-spacing: 0.4px;
           text-transform: uppercase;
-          opacity: 0.8;
         }
-        .pass-mini-value {
-          font-size: 0.78rem;
-          margin-top: 2px;
-          line-height: 1.35;
+        .pass-step-lbl-issue {
+          color: #475569;
         }
-        .action-row-modern {
-          border-top: 1px dashed rgba(15, 23, 42, 0.18);
-          padding-top: 10px;
+        .pass-step-lbl-return {
+          color: #d97706;
         }
-        .pass-action-btn {
-          font-weight: 700;
-          letter-spacing: 0.15px;
+        .pass-step-lbl-next {
+          color: #14b8a6;
         }
-        @media (min-width: 768px) {
-          .pass-mini-grid {
-            grid-template-columns: repeat(2, 1fr);
-          }
+        .pass-step-line {
+          flex: 1;
+          height: 2px;
+          margin: 0 6px;
+          margin-bottom: 22px;
+          border-radius: 2px;
+          transition: background 0.4s;
         }
-        /* ------------------------------------------------- */
+        .psl-done {
+          background: #64748b;
+        }
+        .psl-after-issue {
+          background: #64748b;
+        }
+        .psl-after-return {
+          background: #f59e0b;
+        }
+        .psl-idle {
+          background: #e9eef5;
+        }
+        .pass-step-summary {
+          display: flex;
+          align-items: flex-start;
+          gap: 6px;
+          font-size: 0.71rem;
+          color: #475569;
+          margin-top: 4px;
+          line-height: 1.45;
+          padding-right: 64px;
+        }
+        .signature-block {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          row-gap: 6px;
+          margin: 10px 0;
+        }
+        .signature-preview {
+          display: block;
+          width: 150px;
+          max-width: 100%;
+          border: 1px solid #dbe3ee;
+          border-radius: 8px;
+          padding: 8px;
+          background: #ffffff;
+          margin: 0;
+        }
+        .signature-caption {
+          margin: 0;
+          font-size: 0.875rem;
+          line-height: 1.2;
+          color: #15803d;
+          font-weight: 400;
+        }
+        .card-action-row {
+          margin-top: 10px;
+        }
+        .pass-summary-dot {
+          width: 7px;
+          height: 7px;
+          border-radius: 50%;
+          flex-shrink: 0;
+          margin-top: 4px;
+        }
+        .visit-stage-wrapper {
+          background: #ffffff;
+          border: 1px solid #dbe3ee;
+          border-left-width: 4px;
+          border-left-style: solid;
+          border-radius: 12px;
+          padding: 10px 12px 9px;
+          box-shadow: none;
+        }
+        .visit-step-rail {
+          padding-right: 0;
+          justify-content: center;
+        }
+        .visit-step-rail .pass-step-col {
+          width: 86px;
+          flex: 0 0 86px;
+        }
+        .visit-step-rail .pass-step-line {
+          flex: 1 1 auto;
+        }
+        .psc-next-slate {
+          background: #ffffff;
+          border-color: #475569;
+          color: #334155;
+          animation: pscPulseSlate 1.85s ease-out infinite;
+        }
+        .psc-done-slate {
+          background: #64748b;
+          border-color: #64748b;
+          color: #fff;
+        }
+        .psc-current-teal {
+          background: #14b8a6;
+          border-color: #0d9488;
+          color: #fff;
+          animation: none;
+        }
+        .psc-done-teal {
+          background: #2dd4bf;
+          border-color: #14b8a6;
+          color: #fff;
+        }
+        .psc-final-dark {
+          background: #facc15;
+          border-color: #f59e0b;
+          color: #713f12;
+          box-shadow: none;
+        }
+        @keyframes pscPulseSlate {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(71, 85, 105, 0.42); }
+          50% { box-shadow: 0 0 0 10px rgba(71, 85, 105, 0); }
+        }
+        @keyframes pscPulseTeal {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(20, 184, 166, 0.42); }
+          50% { box-shadow: 0 0 0 10px rgba(20, 184, 166, 0); }
+        }
+        .psl-slate {
+          background: #64748b;
+        }
+        .psl-teal {
+          background: #2dd4bf;
+        }
+        .pass-step-lbl-await {
+          color: #475569;
+        }
+        .pass-step-lbl-onsite {
+          color: #14b8a6;
+        }
+        .pass-step-lbl-closed {
+          color: #0f172a;
+        }
+        .visitor-summary-dot-basic {
+          background: #64748b;
+        }
         .consent-text {
           font-size: 14px;
           line-height: 1.6;
         }
         .consent-text ul {
           padding-left: 20px;
+        }
+        @media (max-width: 767.98px) {
+          .pass-track-wrapper {
+            padding-right: 14px;
+          }
+          .pass-track-eyebrow,
+          .pass-step-rail,
+          .pass-step-summary {
+            padding-right: 0;
+          }
+          .pass-arc-ring {
+            position: static;
+            margin-bottom: 8px;
+          }
         }
       `}</style>
     </div>

@@ -78,7 +78,9 @@ export const requiresFinalDayPassReturnBeforeCheckout = (record, value = new Dat
     return false;
   }
 
-  return !hasPassEventForDate(record, "returned", currentDateKey);
+  // Block checkout only when today's pass was issued but has not been returned yet.
+  // If no issue was recorded for today, final checkout is allowed.
+  return hasPassEventForDate(record, "issued", currentDateKey) && !hasPassEventForDate(record, "returned", currentDateKey);
 };
 
 export const getLatestPassEvent = (record) => {

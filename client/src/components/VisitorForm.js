@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from "react";
 // -------------------------------------------------
 import { motion, AnimatePresence } from "framer-motion";
-import { FaUser, FaWifi, FaInfoCircle } from "react-icons/fa";
+import { FaUser, FaWifi, FaInfoCircle, FaFileExcel } from "react-icons/fa";
 import { useMsal } from "@azure/msal-react";
 import axios from "axios";
 import Swal from "sweetalert2";
@@ -563,10 +563,11 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit,
         {!visitorToEdit && (
           <button
             type="button"
-            className="btn btn-outline-dark btn-sm"
+            className="btn visitor-inline-btn btn-success btn-sm shadow px-3 me-2"
             title="Import visitors from an Excel file"
             onClick={() => setShowBulkUpload(true)}
           >
+            <FaFileExcel className="me-2" />
             Import from Excel
           </button>
         )}

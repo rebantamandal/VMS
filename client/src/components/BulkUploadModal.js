@@ -814,9 +814,27 @@ export default function BulkUploadModal({
             </div>
             <button
               type="button"
-              className="btn btn-sm flex-shrink-0"
+              className="btn btn-sm flex-shrink-0 d-inline-flex align-items-center justify-content-center"
               title="Close"
-              style={{ height: "38px", width: "38px", padding: 0, borderRadius: "50%" }}
+              style={{
+                height: "38px",
+                width: "38px",
+                padding: 0,
+                lineHeight: 1,
+                borderRadius: "50%",
+                border: "1px solid rgba(248, 250, 252, 0.38)",
+                background: "rgba(248, 250, 252, 0.08)",
+                cursor: "pointer",
+                transition: "all 0.2s ease",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "rgba(248, 250, 252, 0.2)";
+                e.currentTarget.style.transform = "translateY(-1px)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "rgba(248, 250, 252, 0.08)";
+                e.currentTarget.style.transform = "translateY(0)";
+              }}
               onClick={closeModal}
               disabled={submitting}
             >
