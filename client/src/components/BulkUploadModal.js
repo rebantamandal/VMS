@@ -133,6 +133,10 @@ const normalizeHeader = (value) =>
 
 const toText = (value) => String(value ?? "").trim();
 
+const NAME_TEXT_REGEX = /^[A-Za-z]+(?:[ '-][A-Za-z]+)*$/;
+
+const isValidNameText = (value) => NAME_TEXT_REGEX.test(toText(value));
+
 const parseBooleanStrict = (value) => {
   if (value === null || value === undefined || value === "") {
     return { valid: true, value: false, provided: false };
@@ -416,7 +420,9 @@ const validateVisitorRows = (records, defaultHostName, submittedBy) => {
     const outTime = parseExcelDate(row.tentativeouttime ?? row.outtime);
 
     if (!firstName) { errors.push(`Row ${lineNumber}: firstName is required.`); rowHasError = true; }
+    else if (!isValidNameText(firstName)) { errors.push(`Row ${lineNumber}: firstName must contain letters only.`); rowHasError = true; }
     if (!lastName) { errors.push(`Row ${lineNumber}: lastName is required.`); rowHasError = true; }
+    else if (!isValidNameText(lastName)) { errors.push(`Row ${lineNumber}: lastName must contain letters only.`); rowHasError = true; }
     if (!email) { errors.push(`Row ${lineNumber}: email is required.`); rowHasError = true; }
     if (email && !EMAIL_REGEX.test(email)) { errors.push(`Row ${lineNumber}: email format is invalid.`); rowHasError = true; }
     if (!company) { errors.push(`Row ${lineNumber}: company is required.`); rowHasError = true; }
@@ -505,6 +511,10 @@ const validateGuestRows = (records, defaultHostName, submittedBy) => {
     }
 
     if (!firstName) errors.push(`Row ${lineNumber}: firstName is required.`);
+    else if (!isValidNameText(firstName)) errors.push(`Row ${lineNumber}: firstName must contain letters only.`);
+    if (lastName && !isValidNameText(lastName)) {
+      errors.push(`Row ${lineNumber}: lastName must contain letters only.`);
+    }
     if (!company) errors.push(`Row ${lineNumber}: company is required.`);
     if (!rowHost) errors.push(`Row ${lineNumber}: host is required.`);
     if (!purposeOfVisit) errors.push(`Row ${lineNumber}: purposeOfVisit is required.`);
@@ -631,11 +641,13 @@ export default function BulkUploadModal({
         : { ...GUEST_SAMPLE_ROW, host: resolvedHostName },
       instructionRows: isVisitor
         ? buildInstructionRows(VISITOR_REQUIRED_FIELDS, VISITOR_OPTIONAL_FIELDS, [
+            "firstName and lastName must contain letters only (no numbers or symbols).",
             "Use date/time format dd-mm-yyyy HH:mm, for example: 10-04-2026 10:00.",
             "host is required and should match the logged-in host name.",
           ])
         : buildInstructionRows(GUEST_REQUIRED_FIELDS, GUEST_OPTIONAL_FIELDS, [
             "category must be Isuzu Employee or UD Employee.",
+            "firstName and lastName must contain letters only (no numbers or symbols).",
             "meetingRoom is required only when meetingRoomRequired is true.",
             "proposedRefreshmentTime is required only when refreshmentRequired is true.",
             "Use date/time format dd-mm-yyyy HH:mm, for example: 10-04-2026 10:00.",

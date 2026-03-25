@@ -1442,7 +1442,7 @@ const getConsentLabel = (v) => {
                         arcTotal = Math.max(1, Math.round((endMs - schedStartMs) / msPerDay) + 1);
                         arcDayN = Math.max(1, Math.min(Math.round((todayMs - startMs) / msPerDay) + 1, arcTotal));
                       }
-                      const R = 20, cx = 26, cy = 26;
+                      const R = 26, cx = 32, cy = 32;
                       const circ = 2 * Math.PI * R;
                       const arcFilled = circ * Math.min(arcDayN / arcTotal, 1);
 
@@ -1481,27 +1481,28 @@ const getConsentLabel = (v) => {
                       return (
                         <div className="pass-track-wrapper mb-3" style={{ borderLeftColor: accentColor }}>
                           <div className="pass-arc-ring">
-                            <svg width="52" height="52" viewBox="0 0 52 52" aria-label={`Day ${arcDayN} of ${arcTotal}`}>
-                              <circle cx={cx} cy={cy} r={R} fill="none" stroke="#e2e8f0" strokeWidth="3.5" />
+                            <svg width="64" height="64" viewBox="0 0 64 64" aria-label={`Day ${arcDayN} of ${arcTotal}`}>
+                              {/* Track */}
+                              <circle cx={cx} cy={cy} r={R} fill="none" stroke="#eef2f8" strokeWidth="5" />
+                              {/* White inner disc so text always reads cleanly */}
+                              <circle cx={cx} cy={cy} r={R - 7} fill="white" />
+                              {/* Progress arc */}
                               <circle
                                 cx={cx}
                                 cy={cy}
                                 r={R}
                                 fill="none"
                                 stroke={accentColor}
-                                strokeWidth="3.5"
+                                strokeWidth="5.5"
                                 strokeDasharray={`${arcFilled} ${circ}`}
                                 strokeLinecap="round"
                                 transform={`rotate(-90 ${cx} ${cy})`}
                               />
-                              <text x={cx} y={cy - 4} textAnchor="middle" dominantBaseline="middle" fontSize="12" fontWeight="800" fill="#1e293b">
-                                {arcDayN}
-                              </text>
-                              <text x={cx} y={cy + 8} textAnchor="middle" dominantBaseline="middle" fontSize="7.5" fontWeight="500" fill="#64748b">
-                                of {arcTotal}
-                              </text>
+                              <text x={cx} y="20" textAnchor="middle" dominantBaseline="middle" fontSize="6.5" fontWeight="800" fill="#94a3b8" letterSpacing="1">DAY</text>
+                              <text x={cx} y="31" textAnchor="middle" dominantBaseline="middle" fontSize="15" fontWeight="900" fill="#0f172a">{arcDayN}</text>
+                              <line x1="20" y1="37" x2="44" y2="37" stroke="#dde3ec" strokeWidth="1.2" />
+                              <text x={cx} y="44" textAnchor="middle" dominantBaseline="middle" fontSize="10.5" fontWeight="700" fill="#64748b">{arcTotal}</text>
                             </svg>
-                            <div className="pass-arc-label">Day</div>
                           </div>
 
                           <div className="pass-track-eyebrow">Daily Pass</div>
@@ -1573,9 +1574,6 @@ const getConsentLabel = (v) => {
 
                     {v.status === "new" && (
                       <div className="text-center d-flex justify-content-center gap-2 flex-wrap card-action-row">
-                        <button className="btn btn-dark btn-sm rounded-pill" onClick={() => openConsent(v)}>
-                          Authorize
-                        </button>
                         <button className="btn btn-outline-dark btn-sm rounded-pill" onClick={() => openDetails(v)}>
                           View Details
                         </button>
@@ -1601,12 +1599,6 @@ const getConsentLabel = (v) => {
                         <button className="btn btn-outline-dark btn-sm rounded-pill" onClick={() => openDetails(v)}>
                           View Details
                         </button>
-                        {/* Show checkout in bottom row only for non-repeated non-adhoc cards. */}
-                        {!isRepeatedRecord && v.source !== "adhoc" && (
-                          <button className="btn btn-warning btn-sm rounded-pill" onClick={() => openCheckout(v)}>
-                            Check Out
-                          </button>
-                        )}
                       </div>
                     )}
                     {/* ------------------------------------------------- */}
@@ -2089,20 +2081,13 @@ const getConsentLabel = (v) => {
         }
         .pass-arc-ring {
           position: absolute;
-          top: 10px;
-          right: 10px;
+          top: 8px;
+          right: 8px;
           display: flex;
           flex-direction: column;
           align-items: center;
           z-index: 1;
-        }
-        .pass-arc-label {
-          font-size: 0.6rem;
-          font-weight: 800;
-          color: #64748b;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-          margin-top: 1px;
+          filter: drop-shadow(0 3px 10px rgba(15,23,42,0.14));
         }
         .pass-track-eyebrow {
           font-size: 0.58rem;
@@ -2111,14 +2096,14 @@ const getConsentLabel = (v) => {
           text-transform: uppercase;
           color: #94a3b8;
           margin-bottom: 8px;
-          padding-right: 64px;
+          padding-right: 80px;
         }
         /* Step rail */
         .pass-step-rail {
           display: flex;
           align-items: center;
-          justify-content: flex-start;
-          padding-right: 64px;
+          justify-content: center;
+          padding-right: 0;
           padding-bottom: 0;
         }
         .pass-step-col {
@@ -2127,6 +2112,14 @@ const getConsentLabel = (v) => {
           align-items: center;
           gap: 5px;
           min-height: 62px;
+        }
+        .pass-step-rail:not(.visit-step-rail) .pass-step-col {
+          width: 62px;
+          flex: 0 0 62px;
+        }
+        .pass-step-rail:not(.visit-step-rail) {
+          justify-content: center;
+          padding-right: 64px;
         }
         .pass-step-circle {
           width: 36px;
@@ -2149,14 +2142,14 @@ const getConsentLabel = (v) => {
           box-shadow: none;
         }
         .psc-idle {
-          background: #f8fafc;
-          border-color: #e2e8f0;
-          color: #cbd5e1;
+          background: #eff6ff;
+          border-color: #bfdbfe;
+          color: #60a5fa;
         }
         .psc-upcoming {
           background: #ffffff;
-          border: 2px dashed #94a3b8;
-          color: #64748b;
+          border: 2px dashed #60a5fa;
+          color: #2563eb;
           box-shadow: none;
         }
         .psc-next-issue {
@@ -2178,14 +2171,14 @@ const getConsentLabel = (v) => {
           animation: pscPulseYellow 1.85s ease-out infinite;
         }
         .psc-done {
-          background: #64748b;
-          border-color: #64748b;
+          background: #2563eb;
+          border-color: #1d4ed8;
           color: #fff;
           box-shadow: none;
         }
         .psc-issue-node.psc-done {
-          background: #64748b;
-          border-color: #64748b;
+          background: #2563eb;
+          border-color: #1d4ed8;
           box-shadow: none;
         }
         .psc-return-node.psc-done {
@@ -2219,38 +2212,62 @@ const getConsentLabel = (v) => {
         .pass-step-lbl {
           font-size: 0.58rem;
           font-weight: 700;
-          color: #94a3b8;
+          color: #60a5fa;
           letter-spacing: 0.4px;
           text-transform: uppercase;
         }
         .pass-step-lbl-issue {
-          color: #475569;
+          color: #0f172a;
         }
         .pass-step-lbl-return {
-          color: #d97706;
+          color: #0f172a;
         }
         .pass-step-lbl-next {
-          color: #14b8a6;
+          color: #0f172a;
         }
         .pass-step-line {
-          flex: 1;
+          flex: 0 0 24px;
+          width: 24px;
           height: 2px;
-          margin: 0 6px;
+          margin: 0 10px;
           margin-bottom: 22px;
-          border-radius: 2px;
+          border-radius: 999px;
+          position: relative;
+          background: var(--psl-color, #dbeafe);
           transition: background 0.4s;
         }
+        .pass-step-rail:not(.visit-step-rail) .pass-step-line {
+          flex: 0 0 28px;
+          width: 28px;
+          margin: 0 8px;
+          margin-bottom: 24px;
+          background: #0f172a;
+        }
+        .pass-step-line::after {
+          content: "";
+          position: absolute;
+          top: 50%;
+          right: -5px;
+          width: 8px;
+          height: 8px;
+          transform: translateY(-50%);
+          background: #0f172a;
+          clip-path: polygon(0 0, 100% 50%, 0 100%);
+        }
+        .pass-step-rail:not(.visit-step-rail) .pass-step-line::after {
+          right: -4px;
+        }
         .psl-done {
-          background: #64748b;
+          --psl-color: #2563eb;
         }
         .psl-after-issue {
-          background: #64748b;
+          --psl-color: #2563eb;
         }
         .psl-after-return {
-          background: #f59e0b;
+          --psl-color: #f59e0b;
         }
         .psl-idle {
-          background: #e9eef5;
+          --psl-color: #dbeafe;
         }
         .pass-step-summary {
           display: flex;
@@ -2260,7 +2277,7 @@ const getConsentLabel = (v) => {
           color: #475569;
           margin-top: 4px;
           line-height: 1.45;
-          padding-right: 64px;
+          padding-right: 80px;
         }
         /* -----------------changed by rebanta-------------- */
         /* Explanation: Keeps signature region and action rows vertically consistent across cards. */
@@ -2318,7 +2335,8 @@ const getConsentLabel = (v) => {
           flex: 0 0 86px;
         }
         .visit-step-rail .pass-step-line {
-          flex: 1 1 auto;
+          flex: 0 0 24px;
+          width: 24px;
         }
         .psc-next-slate {
           background: #ffffff;
@@ -2327,8 +2345,8 @@ const getConsentLabel = (v) => {
           animation: pscPulseBlue 1.85s ease-out infinite;
         }
         .psc-done-slate {
-          background: #64748b;
-          border-color: #64748b;
+          background: #2563eb;
+          border-color: #1d4ed8;
           color: #fff;
         }
         .psc-current-teal {
@@ -2349,22 +2367,22 @@ const getConsentLabel = (v) => {
           box-shadow: none;
         }
         .psl-slate {
-          background: #64748b;
+          --psl-color: #2563eb;
         }
         .psl-teal {
-          background: #2dd4bf;
+          --psl-color: #2dd4bf;
         }
         .pass-step-lbl-await {
-          color: #475569;
+          color: #0f172a;
         }
         .pass-step-lbl-onsite {
-          color: #14b8a6;
+          color: #0f172a;
         }
         .pass-step-lbl-closed {
           color: #0f172a;
         }
         .visitor-summary-dot-basic {
-          background: #64748b;
+          background: #2563eb;
         }
         .consent-text {
           font-size: 14px;
