@@ -1274,7 +1274,13 @@ const getConsentLabel = (v) => {
                 const basicStep1Label = basicCanAuthorize ? "Authorize" : "Authorized";
                 const basicStep3Label = v.status === "checkedOut" ? "Complete" : "Check-Out";
                 const basicAccentColor =
-                  v.status === "checkedOut" ? "#f59e0b" : v.status === "checkedIn" ? "#14b8a6" : "#64748b";
+                  basicCanAuthorize
+                    ? "#2563eb"
+                    : basicCanCheckout
+                      ? "#f59e0b"
+                      : v.status === "checkedOut"
+                        ? "#f59e0b"
+                        : "#14b8a6";
                 const basicSummary =
                   v.status === "checkedOut"
                     ? "Visit completed successfully."
@@ -1435,12 +1441,14 @@ const getConsentLabel = (v) => {
                           : "upcoming";
                       const step3Label = canCheckoutFromPassRail ? "Check-Out" : (isFinalDayNow ? "Complete" : "Next Day");
                       const accentColor =
-                        canCheckoutFromPassRail || step3State === "final"
+                        canCheckoutFromPassRail
                           ? "#f59e0b"
-                          : step2State === "next-return" || step2State === "done"
+                          : step2State === "next-return"
                             ? "#f59e0b"
                             : step3State === "done"
                               ? "#14b8a6"
+                            : step1State === "next-slate" || step1State === "next-issue"
+                              ? "#2563eb"
                               : "#64748b";
 
                       return (
@@ -1525,12 +1533,16 @@ const getConsentLabel = (v) => {
                       );
                     })()}
 
+                    {/* -----------------changed by rebanta-------------- */}
+                    {/* Explanation: Signature preview + caption use dedicated classes so spacing stays
+                        uniform with nearby progress and action sections. */}
                     {v.displaySignature && (
                       <div className="signature-block">
                         <img src={v.displaySignature} alt="signature" width={150} className="signature-preview" />
                         <p className="signature-caption">✔ Signed (Encrypted)</p>
                       </div>
                     )}
+                    {/* ------------------------------------------------- */}
 
                     {v.status === "new" && (
                       <div className="text-center d-flex justify-content-center gap-2 flex-wrap card-action-row">
@@ -2084,9 +2096,9 @@ const getConsentLabel = (v) => {
         }
         .psc-next-issue {
           background: #ffffff;
-          border-color: #475569;
-          color: #334155;
-          animation: pscPulseSlate 1.85s ease-out infinite;
+          border-color: #2563eb;
+          color: #1d4ed8;
+          animation: pscPulseBlue 1.85s ease-out infinite;
         }
         .psc-next-return {
           background: #ffffff;
@@ -2126,6 +2138,10 @@ const getConsentLabel = (v) => {
           border-color: #f59e0b;
           color: #713f12;
           box-shadow: none;
+        }
+        @keyframes pscPulseBlue {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(37,99,235,0.45); }
+          50%       { box-shadow: 0 0 0 9px rgba(37,99,235,0); }
         }
         @keyframes pscPulseIndigo {
           0%, 100% { box-shadow: 0 0 0 0 rgba(99,102,241,0.5); }
@@ -2185,6 +2201,8 @@ const getConsentLabel = (v) => {
           line-height: 1.45;
           padding-right: 64px;
         }
+        /* -----------------changed by rebanta-------------- */
+        /* Explanation: Keeps signature region and action rows vertically consistent across cards. */
         .signature-block {
           display: flex;
           flex-direction: column;
@@ -2213,6 +2231,7 @@ const getConsentLabel = (v) => {
         .card-action-row {
           margin-top: 10px;
         }
+        /* ------------------------------------------------- */
         .pass-summary-dot {
           width: 7px;
           height: 7px;
@@ -2242,9 +2261,9 @@ const getConsentLabel = (v) => {
         }
         .psc-next-slate {
           background: #ffffff;
-          border-color: #475569;
-          color: #334155;
-          animation: pscPulseSlate 1.85s ease-out infinite;
+          border-color: #2563eb;
+          color: #1d4ed8;
+          animation: pscPulseBlue 1.85s ease-out infinite;
         }
         .psc-done-slate {
           background: #64748b;
