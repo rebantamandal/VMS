@@ -142,7 +142,7 @@ const isAfterFinalCheckoutDay = (visitor, now = new Date()) => {
 };
 
 const getPassTrackingMeta = (visitor, now = new Date()) => {
-  const enabled = isLongPeriodVisit(visitor);
+  const enabled = isRepeatedVisitorType(visitor);
   if (!enabled) {
     return { enabled: false };
   }
@@ -1292,7 +1292,7 @@ const getConsentLabel = (v) => {
                 const basicJourneyEnabled = !passTracking.enabled;
                 const basicCanAuthorize = basicJourneyEnabled && v.status === "new";
                 const basicStep1State = v.status === "new" ? "next-slate" : "done-slate";
-                const basicStep2State = v.status === "checkedIn" ? "current-teal" : v.status === "checkedOut" ? "done-teal" : "idle";
+                const basicStep2State = v.status === "checkedIn" || v.status === "checkedOut" ? "done-teal" : "idle";
                 const basicCanCheckout = basicJourneyEnabled && v.status === "checkedIn";
                 const basicStep3State = v.status === "checkedOut" ? "final-dark" : basicCanCheckout ? "next-checkout" : "idle";
                 const basicStep1Label = basicCanAuthorize ? "Authorize" : "Authorized";
@@ -1601,8 +1601,8 @@ const getConsentLabel = (v) => {
                         <button className="btn btn-outline-dark btn-sm rounded-pill" onClick={() => openDetails(v)}>
                           View Details
                         </button>
-                        {/* Show checkout only for non-repeated visitors (basic/adhoc). Repeated visitors check out via View Details on final/overdue day. */}
-                        {!isRepeatedRecord && (
+                        {/* Show checkout in bottom row only for non-repeated non-adhoc cards. */}
+                        {!isRepeatedRecord && v.source !== "adhoc" && (
                           <button className="btn btn-warning btn-sm rounded-pill" onClick={() => openCheckout(v)}>
                             Check Out
                           </button>
@@ -1947,7 +1947,7 @@ const getConsentLabel = (v) => {
       {/*----------------------------------Changes by Anup----------------------------------------------------------------------- */}
       <AnimatePresence>
         {showDetails && detailsVisitor && (() => {
-          const detailsCanCheckout = detailsVisitor.status === "checkedIn";
+          const detailsCanCheckout = detailsVisitor.status === "checkedIn" && isRepeatedVisitorType(detailsVisitor);
           const passHistory = buildPassHistory(detailsVisitor);
           return (
             <motion.div
