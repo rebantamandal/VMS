@@ -2002,7 +2002,6 @@ const getConsentLabel = (v) => {
                           <thead className="table-light">
                             <tr>
                               <th>Date</th>
-                              <th>Cycle</th>
                               <th>Issued At</th>
                               <th>Returned At</th>
                               <th>Status</th>
@@ -2012,7 +2011,6 @@ const getConsentLabel = (v) => {
                             {passHistory.map((row, idx) => (
                               <tr key={idx}>
                                 <td>{row.dateKey}</td>
-                                <td>{row.cycle}</td>
                                 <td>{row.issueEvent ? formatIST(row.issueEvent.recordedAt) : "-"}</td>
                                 <td>{row.returnEvent ? formatIST(row.returnEvent.recordedAt) : "-"}</td>
                                 <td>
