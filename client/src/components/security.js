@@ -144,7 +144,7 @@ const isAfterFinalCheckoutDay = (visitor, now = new Date()) => {
 const getPassTrackingMeta = (visitor, now = new Date()) => {
   const enabled = isRepeatedVisitorType(visitor);
   if (!enabled) {
-    return { enabled: false };
+    return { enabled: false, canCheckout: false };
   }
 
   const todayKey = getPassDateKey(now);
@@ -167,6 +167,7 @@ const getPassTrackingMeta = (visitor, now = new Date()) => {
       enabled: true,
       canIssue: false,
       canReturn: false,
+      canCheckout: false,
       tone: "secondary",
       summary: isCheckedOut
         ? "Visit completed and checked out."
@@ -181,6 +182,7 @@ const getPassTrackingMeta = (visitor, now = new Date()) => {
       enabled: true,
       canIssue: false,
       canReturn: false,
+      canCheckout: false,
       tone: "secondary",
       // Clarifies that pass actions are closed only after the visit window ends.
       summary: "Visit window ended. Complete final Check Out if still pending.",
@@ -190,10 +192,24 @@ const getPassTrackingMeta = (visitor, now = new Date()) => {
   }
 
   if (returnToday) {
+    if (isFinalDay) {
+      // On final day, after return, prompt checkout instead of return
+      return {
+        enabled: true,
+        canIssue: false,
+        canReturn: false,
+        canCheckout: true,
+        tone: "warning",
+        summary: `Final day pass returned at ${formatIST(returnToday.recordedAt)}. Complete check-out now.`,
+        issueToday,
+        returnToday,
+      };
+    }
     return {
       enabled: true,
       canIssue: false,
       canReturn: false,
+      canCheckout: false,
       tone: "success",
       summary: `Pass returned today at ${formatIST(returnToday.recordedAt)}.`,
       issueToday,
@@ -202,14 +218,28 @@ const getPassTrackingMeta = (visitor, now = new Date()) => {
   }
 
   if (issueToday) {
+    if (isFinalDay) {
+      return {
+        enabled: true,
+        canIssue: false,
+        canReturn: false,
+        canCheckout: true,
+        tone: "warning",
+        summary: `Final day pass issued at ${formatIST(issueToday.recordedAt)}. Complete check-out now.`,
+        issueToday,
+        returnToday,
+      };
+    }
+
     return {
       enabled: true,
       canIssue: false,
       canReturn: true,
+      canCheckout: false,
       tone: alertSentToday ? "danger" : "warning",
       summary: alertSentToday
         ? `Alert sent. Today's pass was issued at ${formatIST(issueToday.recordedAt)} and is still pending return.`
-        : `Pass issued today at ${formatIST(issueToday.recordedAt)}. Awaiting return${isFinalDay ? " before checkout" : ""}.`,
+        : `Pass issued today at ${formatIST(issueToday.recordedAt)}. Awaiting return.`,
       issueToday,
       returnToday,
     };
@@ -219,10 +249,11 @@ const getPassTrackingMeta = (visitor, now = new Date()) => {
     enabled: true,
     canIssue: trackingActive,
     canReturn: false,
+    canCheckout: false,
     tone: trackingActive ? "primary" : "secondary",
     summary: trackingActive
       ? isFinalDay
-        ? "Final day: issue today's pass, then return it and complete checkout."
+        ? "Final day: issue today's pass, then complete checkout."
         : "Ready to issue today's pass."
       : "Pass tracking becomes active only while the visitor is checked in during the visit window.",
     issueToday,
@@ -1456,11 +1487,32 @@ const getConsentLabel = (v) => {
                           : passTracking.canIssue
                             ? "next-issue"
                             : "idle";
-                      const step2State = passTracking.returnToday ? "done" : passTracking.canReturn ? "next-return" : "idle";
-                      const conn1Done = Boolean(passTracking.issueToday);
-                      const conn2Done = Boolean(passTracking.returnToday);
                       const isFinalDayNow = isFinalCheckoutDay(v, guardNow);
-                      const canCheckoutFromPassRail = showOnlyCheckout && v.status === "checkedIn";
+                      // On final day and after, return is always checkout
+                      const isFinalDayOrAfter = isFinalCheckoutDay(v, guardNow);
+                      let step2State;
+                      if (isFinalDayOrAfter) {
+                        if (passTracking.returnToday || passTracking.canCheckout) {
+                          step2State = passTracking.canCheckout ? "next-checkout" : "done";
+                        } else {
+                          step2State = passTracking.canCheckout ? "next-checkout" : "idle";
+                        }
+                      } else {
+                        step2State = passTracking.returnToday
+                          ? "done"
+                          : passTracking.canCheckout
+                            ? "next-checkout"
+                            : passTracking.canReturn
+                              ? "next-return"
+                              : "idle";
+                      }
+
+                      const conn1Done = Boolean(passTracking.issueToday);
+                      const conn2Done = isFinalDayOrAfter
+                        ? Boolean(passTracking.returnToday || passTracking.canCheckout)
+                        : Boolean(passTracking.returnToday || passTracking.canCheckout);
+                      const canCheckoutFromPassRail =
+                        (passTracking.canCheckout || showOnlyCheckout) && v.status === "checkedIn";
                       // Remove Next Day step for repeated records
                       let step3State = canCheckoutFromPassRail
                         ? "next-checkout"
@@ -1542,14 +1594,28 @@ const getConsentLabel = (v) => {
 
                             <div className="pass-step-col">
                               <div
-                                className={`pass-step-circle psc-${step2State} psc-return-node ${step2State === "next-return" ? "pass-step-circle-actionable" : ""}`}
-                                onClick={step2State === "next-return" && !isPassActionBusy ? () => recordDailyPassEvent(v, "returned") : undefined}
-                                title={step2State === "next-return" ? "Return Pass" : undefined}
-                                style={{ cursor: step2State === "next-return" ? "pointer" : "default" }}
+                                className={`pass-step-circle psc-${step2State} psc-return-node ${(step2State === "next-return" || step2State === "next-checkout") ? "pass-step-circle-actionable" : ""}`}
+                                onClick={
+                                  step2State === "next-checkout"
+                                    ? () => openCheckout(v)
+                                    : step2State === "next-return" && !isPassActionBusy
+                                      ? () => recordDailyPassEvent(v, "returned")
+                                      : undefined
+                                }
+                                title={
+                                  step2State === "next-checkout"
+                                    ? "Check-Out"
+                                    : step2State === "next-return"
+                                      ? "Return Pass"
+                                      : undefined
+                                }
+                                style={{ cursor: (step2State === "next-return" || step2State === "next-checkout") ? "pointer" : "default" }}
                               >
                                 {step2State === "done" ? "✓" : "2"}
                               </div>
-                              <div className="pass-step-lbl pass-step-lbl-return">Return</div>
+                              <div className="pass-step-lbl pass-step-lbl-return">
+                                {step2State === "next-checkout" ? "Check-Out" : "Return"}
+                              </div>
                             </div>
                             {/* Hide the arrow connector after the second step for repeated records */}
                             {(!isRepeatedRecord) && (
