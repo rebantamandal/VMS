@@ -53,7 +53,8 @@ export const isPassTrackingDay = (record, value = new Date()) => {
   const currentDateKey = getPassDateKey(value);
   const finalOutDateKey = getPassDateKey(record?.outTime);
 
-  return Boolean(currentDateKey && finalOutDateKey && currentDateKey < finalOutDateKey);
+  // Allow pass tracking through the final checkout day so security can issue/return before checkout.
+  return Boolean(currentDateKey && finalOutDateKey && currentDateKey <= finalOutDateKey);
 };
 
 export const getDailyPassEvents = (record) => {
@@ -104,7 +105,8 @@ export const addPassEventAtomic = async ({
 
   if (!isPassTrackingDay(existing, recordedAt)) {
     throw createPassTrackingError(
-      "Daily pass tracking is available only before the final checkout day."
+      // Keep error text aligned with inclusive final-day tracking behavior.
+      "Daily pass tracking is available only during the visit window (including the final checkout day)."
     );
   }
 
@@ -213,7 +215,8 @@ export const appendPassEvent = (record, { action, recordedAt = new Date(), recor
   }
 
   if (!isPassTrackingDay(record, recordedAt)) {
-    throw new Error("Daily pass tracking is available only before the final checkout day.");
+    // Keep error text aligned with inclusive final-day tracking behavior.
+    throw new Error("Daily pass tracking is available only during the visit window (including the final checkout day).");
   }
 
   const dateKey = getPassDateKey(recordedAt);

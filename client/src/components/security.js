@@ -139,6 +139,13 @@ const isLongPeriodVisit = (visitor) => {
 
 const isRepeatedVisitorType = (visitor) => visitor?.source !== "adhoc" && isLongPeriodVisit(visitor);
 
+const isFinalCheckoutDay = (visitor, now = new Date()) => {
+  // Derives whether current IST day is the scheduled final checkout day for repeated records.
+  const todayKey = getPassDateKey(now);
+  const finalOutDateKey = getPassDateKey(visitor?.outTime);
+  return Boolean(todayKey && finalOutDateKey && todayKey === finalOutDateKey);
+};
+
 const getPassTrackingMeta = (visitor, now = new Date()) => {
   const enabled = isLongPeriodVisit(visitor);
   if (!enabled) {
@@ -151,9 +158,10 @@ const getPassTrackingMeta = (visitor, now = new Date()) => {
   const issueToday = todayEvents.find((event) => event?.action === "issued");
   const returnToday = todayEvents.find((event) => event?.action === "returned");
   const alertSentToday = Array.isArray(visitor?.dailyPassAlertDates) && visitor.dailyPassAlertDates.includes(todayKey);
+  const isFinalDay = Boolean(todayKey && finalOutDateKey && todayKey === finalOutDateKey);
   const trackingActive =
     visitor?.status === "checkedIn" &&
-    Boolean(todayKey && finalOutDateKey && todayKey < finalOutDateKey);
+    Boolean(todayKey && finalOutDateKey && todayKey <= finalOutDateKey);
 
   if (visitor?.status !== "checkedIn") {
     return {
@@ -167,13 +175,14 @@ const getPassTrackingMeta = (visitor, now = new Date()) => {
     };
   }
 
-  if (todayKey && finalOutDateKey && todayKey >= finalOutDateKey) {
+  if (todayKey && finalOutDateKey && todayKey > finalOutDateKey) {
     return {
       enabled: true,
       canIssue: false,
       canReturn: false,
       tone: "secondary",
-      summary: "Final day of visit. Use final Check Out when the visitor leaves.",
+      // Clarifies that pass actions are closed only after the visit window ends.
+      summary: "Visit window ended. Complete final Check Out if still pending.",
       issueToday,
       returnToday,
     };
@@ -181,7 +190,7 @@ const getPassTrackingMeta = (visitor, now = new Date()) => {
 
   if (returnToday) {
     const tomorrowKey = getPassDateKey(new Date(now.getTime() + 24 * 60 * 60 * 1000));
-    const nextIssueAvailable = tomorrowKey && finalOutDateKey && tomorrowKey < finalOutDateKey;
+    const nextIssueAvailable = tomorrowKey && finalOutDateKey && tomorrowKey <= finalOutDateKey;
 
     return {
       enabled: true,
@@ -189,7 +198,9 @@ const getPassTrackingMeta = (visitor, now = new Date()) => {
       canReturn: false,
       tone: "success",
       summary: `Pass returned today at ${formatIST(returnToday.recordedAt)}.`,
-      nextIssueLabel: nextIssueAvailable
+      nextIssueLabel: isFinalDay
+        ? "Ready for final checkout"
+        : nextIssueAvailable
         ? `${formatDateKeyForIST(tomorrowKey)} (IST)`
         : "Not applicable (final checkout day)",
       issueToday,
@@ -205,8 +216,8 @@ const getPassTrackingMeta = (visitor, now = new Date()) => {
       tone: alertSentToday ? "danger" : "warning",
       summary: alertSentToday
         ? `Alert sent. Today's pass was issued at ${formatIST(issueToday.recordedAt)} and is still pending return.`
-        : `Pass issued today at ${formatIST(issueToday.recordedAt)}. Awaiting return.`,
-      nextIssueLabel: "After pass return is recorded",
+        : `Pass issued today at ${formatIST(issueToday.recordedAt)}. Awaiting return${isFinalDay ? " before checkout" : ""}.`,
+      nextIssueLabel: isFinalDay ? "Return pass, then complete final checkout" : "After pass return is recorded",
       issueToday,
       returnToday,
     };
@@ -218,8 +229,10 @@ const getPassTrackingMeta = (visitor, now = new Date()) => {
     canReturn: false,
     tone: trackingActive ? "primary" : "secondary",
     summary: trackingActive
-      ? "Ready to issue today's pass."
-      : "Pass tracking becomes active only while the visitor is checked in before the final checkout day.",
+      ? isFinalDay
+        ? "Final day: issue today's pass, then return it and complete checkout."
+        : "Ready to issue today's pass."
+      : "Pass tracking becomes active only while the visitor is checked in during the visit window.",
       nextIssueLabel: trackingActive ? `${formatDateKeyForIST(todayKey)} (IST)` : "",
     issueToday,
     returnToday,
@@ -1264,6 +1277,9 @@ const getConsentLabel = (v) => {
                 const passStatusLabel = getPassStatusLabel(passTracking);
                 const passTodayLabel = getPassTodayLabel(passTracking);
                 const isRepeatedRecord = isRepeatedVisitorType(v);
+                // Final-day repeated records should move to checkout-only once return is recorded.
+                const isFinalDayRepeated = isRepeatedRecord && isFinalCheckoutDay(v);
+                const showOnlyCheckout = isFinalDayRepeated && Boolean(passTracking.returnToday);
 
                 return (
                 <motion.div
@@ -1402,40 +1418,58 @@ const getConsentLabel = (v) => {
 
                     {v.status === "checkedIn" && (
                       <div className="d-flex justify-content-center gap-2 mt-3 flex-wrap action-row-modern">
-                        <button className="btn btn-outline-primary btn-sm rounded-pill" onClick={() => handleBadgeEditOpen(v)}>
-                          <FaEdit className="me-1" /> Edit Badge
-                        </button>
-                        {passTracking.enabled && passTracking.canIssue && v.source !== "adhoc" && (
-                          <button
-                            className="btn btn-success btn-sm rounded-pill pass-action-btn"
-                            onClick={() => recordDailyPassEvent(v, "issued")}
-                            disabled={passActionKey === `${v._id}:issued`}
-                          >
-                            Issue Pass
-                          </button>
-                        )}
-                        {passTracking.enabled && passTracking.canReturn && v.source !== "adhoc" && (
-                          <button
-                            className="btn btn-danger btn-sm rounded-pill pass-action-btn"
-                            onClick={() => recordDailyPassEvent(v, "returned")}
-                            disabled={passActionKey === `${v._id}:returned`}
-                          >
-                            Return Pass
-                          </button>
-                        )}
-                        <button className="btn btn-outline-dark btn-sm rounded-pill" onClick={() => printCard(v)}>
-                          <FaPrint className="me-1" /> Print Card
-                        </button>
+                        {showOnlyCheckout ? (
+                          <>
+                            <button className="btn btn-outline-dark btn-sm rounded-pill" onClick={() => openDetails(v)}>
+                              {/* Keep View Details always available, including checkout-only state. */}
+                              View Details
+                            </button>
+                            <button className="btn btn-warning btn-sm rounded-pill" onClick={() => openCheckout(v)}>
+                              {/* On final day after return, enforce checkout-only action on card. */}
+                              Check Out
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button className="btn btn-outline-primary btn-sm rounded-pill" onClick={() => handleBadgeEditOpen(v)}>
+                              <FaEdit className="me-1" /> Edit Badge
+                            </button>
+                            {passTracking.enabled && passTracking.canIssue && v.source !== "adhoc" && (
+                              <button
+                                className="btn btn-success btn-sm rounded-pill pass-action-btn"
+                                onClick={() => recordDailyPassEvent(v, "issued")}
+                                disabled={passActionKey === `${v._id}:issued`}
+                              >
+                                Issue Pass
+                              </button>
+                            )}
+                            {passTracking.enabled && passTracking.canReturn && v.source !== "adhoc" && (
+                              <button
+                                className="btn btn-danger btn-sm rounded-pill pass-action-btn"
+                                onClick={() => recordDailyPassEvent(v, "returned")}
+                                disabled={passActionKey === `${v._id}:returned`}
+                              >
+                                Return Pass
+                              </button>
+                            )}
+                            <button className="btn btn-outline-dark btn-sm rounded-pill" onClick={() => printCard(v)}>
+                              <FaPrint className="me-1" /> Print Card
+                            </button>
 
-                        {/*----------------------------------Changes by Anup----------------------------------------------------------------------- */}
-                        <button className="btn btn-outline-dark btn-sm rounded-pill" onClick={() => openDetails(v)}>
-                          View Details   {/*This is what the user will see on the cards of the security page */}
-                        </button>
-                        {/*----------------------------------Changes by Anup----------------------------------------------------------------------- */}
+                            {/*----------------------------------Changes by Anup----------------------------------------------------------------------- */}
+                            <button className="btn btn-outline-dark btn-sm rounded-pill" onClick={() => openDetails(v)}>
+                              View Details   {/*This is what the user will see on the cards of the security page */}
+                            </button>
+                            {/*----------------------------------Changes by Anup----------------------------------------------------------------------- */}
 
-                        <button className="btn btn-warning btn-sm rounded-pill" onClick={() => openCheckout(v)}>
-                          Check Out
-                        </button>
+                            {(!isRepeatedRecord || isFinalCheckoutDay(v)) && (
+                              <button className="btn btn-warning btn-sm rounded-pill" onClick={() => openCheckout(v)}>
+                                {/* Keep direct checkout on card for non-repeated visits and final-day repeated visits. */}
+                                Check Out
+                              </button>
+                            )}
+                          </>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1864,7 +1898,37 @@ const getConsentLabel = (v) => {
                   
                 </div>
 
-                <div className="text-center mt-4">
+                <div className="text-center mt-4 d-flex justify-content-center gap-2 flex-wrap">
+                  {detailsVisitor.status === "checkedIn" && (() => {
+                    // Checkout is optional in View Details until final day for repeated records.
+                    const detailsPassMeta = getPassTrackingMeta(detailsVisitor);
+                    const detailsIsRepeated = isRepeatedVisitorType(detailsVisitor);
+                    const detailsIsFinalDay = isFinalCheckoutDay(detailsVisitor);
+                    const requireReturnBeforeFinalCheckout =
+                      detailsIsRepeated &&
+                      detailsIsFinalDay &&
+                      Boolean(detailsPassMeta.issueToday && !detailsPassMeta.returnToday);
+
+                    return (
+                      <button
+                        className="btn btn-warning rounded-pill px-4"
+                        disabled={requireReturnBeforeFinalCheckout}
+                        title={
+                          requireReturnBeforeFinalCheckout
+                            ? "Return today's pass before final checkout"
+                            : detailsIsRepeated && !detailsIsFinalDay
+                              ? "Optional until the final day"
+                              : "Proceed to checkout"
+                        }
+                        onClick={() => {
+                          setShowDetails(false);
+                          openCheckout(detailsVisitor);
+                        }}
+                      >
+                        {detailsIsRepeated && !detailsIsFinalDay ? "Optional Check Out" : "Check Out"}
+                      </button>
+                    );
+                  })()}
                   <button
                     className="btn btn-dark rounded-pill px-4"
                     onClick={() => setShowDetails(false)} 
