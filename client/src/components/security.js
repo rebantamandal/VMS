@@ -1461,22 +1461,35 @@ const getConsentLabel = (v) => {
                       const conn2Done = Boolean(passTracking.returnToday);
                       const isFinalDayNow = isFinalCheckoutDay(v, guardNow);
                       const canCheckoutFromPassRail = showOnlyCheckout && v.status === "checkedIn";
-                      const step3State = canCheckoutFromPassRail
+                      // Remove Next Day step for repeated records
+                      let step3State = canCheckoutFromPassRail
                         ? "next-checkout"
                         : conn2Done
                           ? (isFinalDayNow ? "final" : "done")
                           : "upcoming";
-                      const step3Label = canCheckoutFromPassRail ? "Check-Out" : (isFinalDayNow ? "Complete" : "Next Day");
-                      const accentColor =
-                        canCheckoutFromPassRail
-                          ? "#f59e0b"
-                          : step2State === "next-return"
-                            ? "#f59e0b"
-                            : step3State === "done"
-                              ? "#14b8a6"
-                            : step1State === "next-slate" || step1State === "next-issue"
-                              ? "#2563eb"
-                              : "#64748b";
+                      let step3Label = canCheckoutFromPassRail ? "Check-Out" : (isFinalDayNow ? "Complete" : "Next Day");
+                      if (isRepeatedRecord) {
+                        // For repeated records, remove the Next Day step entirely
+                        // But on final day after return, show checkout option in progress bar
+                        if (isFinalDayNow && conn2Done) {
+                          step3State = "next-checkout";
+                          step3Label = "Check-Out";
+                        } else {
+                          step3State = null;
+                          step3Label = null;
+                        }
+                      }
+                      // Set left accent to green after return
+                      let accentColor = "#64748b";
+                      if (canCheckoutFromPassRail) {
+                        accentColor = "#f59e0b";
+                      } else if (step2State === "next-return") {
+                        accentColor = "#f59e0b";
+                      } else if (conn2Done) {
+                        accentColor = "#14b8a6"; // green after return
+                      } else if (step1State === "next-slate" || step1State === "next-issue") {
+                        accentColor = "#2563eb";
+                      }
 
                       return (
                         <div className="pass-track-wrapper mb-3" style={{ borderLeftColor: accentColor }}>
@@ -1538,19 +1551,24 @@ const getConsentLabel = (v) => {
                               </div>
                               <div className="pass-step-lbl pass-step-lbl-return">Return</div>
                             </div>
-                            <div className={`pass-step-line ${conn2Done ? "psl-done psl-after-return" : "psl-idle"}`} />
+                            {/* Hide the arrow connector after the second step for repeated records */}
+                            {(!isRepeatedRecord) && (
+                              <div className={`pass-step-line ${conn2Done ? "psl-done psl-after-return" : "psl-idle"}`} />
+                            )}
 
-                            <div className="pass-step-col">
-                              <div
-                                className={`pass-step-circle psc-${step3State} psc-next-node ${canCheckoutFromPassRail ? "pass-step-circle-actionable" : ""}`}
-                                onClick={canCheckoutFromPassRail ? () => openCheckout(v) : undefined}
-                                title={canCheckoutFromPassRail ? "Check-Out" : undefined}
-                                style={{ cursor: canCheckoutFromPassRail ? "pointer" : "default" }}
-                              >
-                                {step3State === "done" || step3State === "final" ? "✓" : "→"}
+                            {(!isRepeatedRecord) && (
+                              <div className="pass-step-col">
+                                <div
+                                  className={`pass-step-circle psc-${step3State} psc-next-node ${canCheckoutFromPassRail ? "pass-step-circle-actionable" : ""}`}
+                                  onClick={canCheckoutFromPassRail ? () => openCheckout(v) : undefined}
+                                  title={canCheckoutFromPassRail ? "Check-Out" : undefined}
+                                  style={{ cursor: canCheckoutFromPassRail ? "pointer" : "default" }}
+                                >
+                                  {step3State === "done" || step3State === "final" ? "✓" : "→"}
+                                </div>
+                                <div className="pass-step-lbl pass-step-lbl-next">{step3Label}</div>
                               </div>
-                              <div className="pass-step-lbl pass-step-lbl-next">{step3Label}</div>
-                            </div>
+                            )}
                           </div>
 
                           <div className="pass-step-summary">
@@ -2100,7 +2118,11 @@ const getConsentLabel = (v) => {
         .pass-step-rail {
           display: flex;
           align-items: center;
-          justify-content: center;
+          justify-content: space-between;
+          width: 100%;
+          max-width: 340px;
+          margin-left: auto;
+          margin-right: auto;
           padding-right: 0;
           padding-bottom: 0;
         }
@@ -2113,11 +2135,17 @@ const getConsentLabel = (v) => {
         }
         .pass-step-rail:not(.visit-step-rail) .pass-step-col {
           width: 62px;
-          flex: 0 0 62px;
+          flex: 1 1 0;
+        }
+        .pass-step-rail:not(.visit-step-rail) .pass-step-col:first-child,
+        .pass-step-rail:not(.visit-step-rail) .pass-step-col:nth-child(3),
+        .pass-step-rail:not(.visit-step-rail) .pass-step-line:nth-child(2),
+        .pass-step-rail:not(.visit-step-rail) .pass-step-line:nth-child(4) {
+          margin-left: -36px;
         }
         .pass-step-rail:not(.visit-step-rail) {
-          justify-content: center;
-          padding-right: 64px;
+          justify-content: space-between;
+          padding-right: 0;
         }
         .pass-step-circle {
           width: 36px;
@@ -2224,10 +2252,10 @@ const getConsentLabel = (v) => {
           color: #0f172a;
         }
         .pass-step-line {
-          flex: 0 0 24px;
-          width: 24px;
+          flex: 0 0 32px;
+          width: 32px;
           height: 2px;
-          margin: 0 10px;
+          margin: 0 0.5vw;
           margin-bottom: 22px;
           border-radius: 999px;
           position: relative;
@@ -2235,9 +2263,9 @@ const getConsentLabel = (v) => {
           transition: background 0.4s;
         }
         .pass-step-rail:not(.visit-step-rail) .pass-step-line {
-          flex: 0 0 28px;
-          width: 28px;
-          margin: 0 8px;
+          flex: 0 0 32px;
+          width: 32px;
+          margin: 0 0.5vw;
           margin-bottom: 24px;
           background: #0f172a;
         }
@@ -2395,12 +2423,17 @@ const getConsentLabel = (v) => {
             padding-right: 14px;
           }
           .pass-track-eyebrow,
-          .pass-step-rail,
-          .pass-step-summary {
-            padding-right: 0;
+          .pass-step-rail {
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            margin-bottom: 8px;
           }
-          .pass-arc-ring {
-            position: static;
+          /* Center align for repeated records (2 steps only) */
+          .pass-step-rail .pass-step-col:only-child {
+            margin-left: auto;
+            margin-right: auto;
+          }
             margin-bottom: 8px;
           }
         }
