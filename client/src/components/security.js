@@ -1488,15 +1488,11 @@ const getConsentLabel = (v) => {
                             ? "next-issue"
                             : "idle";
                       const isFinalDayNow = isFinalCheckoutDay(v, guardNow);
-                      // On final day and after, return is always checkout
+                      // On final day, replace return with checkout (no return step)
                       const isFinalDayOrAfter = isFinalCheckoutDay(v, guardNow);
                       let step2State;
                       if (isFinalDayOrAfter) {
-                        if (passTracking.returnToday || passTracking.canCheckout) {
-                          step2State = passTracking.canCheckout ? "next-checkout" : "done";
-                        } else {
-                          step2State = passTracking.canCheckout ? "next-checkout" : "idle";
-                        }
+                        step2State = passTracking.canCheckout ? "next-checkout" : v.status === "checkedOut" ? "done" : "idle";
                       } else {
                         step2State = passTracking.returnToday
                           ? "done"
@@ -1614,7 +1610,11 @@ const getConsentLabel = (v) => {
                                 {step2State === "done" ? "✓" : "2"}
                               </div>
                               <div className="pass-step-lbl pass-step-lbl-return">
-                                {step2State === "next-checkout" ? "Check-Out" : "Return"}
+                                {isFinalCheckoutDay(v, guardNow)
+                                  ? (v.status === "checkedOut" ? "Complete" : "Check-Out")
+                                  : step2State === "next-checkout"
+                                    ? "Check-Out"
+                                    : "Return"}
                               </div>
                             </div>
                             {/* Hide the arrow connector after the second step for repeated records */}
