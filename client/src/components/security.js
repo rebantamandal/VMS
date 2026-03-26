@@ -1259,7 +1259,7 @@ const getConsentLabel = (v) => {
         </div>
 
         {/* ✅ FIX: all 4 counts now use countVisitors — stable regardless of active filter tab */}
-        <div className="d-flex justify-content-center gap-2 mb-2 flex-wrap align-items-center">
+        <div className="d-flex justify-content-center gap-2 mb-5 flex-wrap align-items-center">
           <button
             className={`btn btn-sm rounded-pill px-4 ${statusFilter === "all" ? "btn-dark" : "btn-outline-dark"}`}
             onClick={() => setStatusFilter("all")}
@@ -1353,7 +1353,7 @@ const getConsentLabel = (v) => {
                   transition={{ delay: i * 0.1 }}
                 >
                   <div
-                    className="card shadow-lg border-0 p-4 rounded-4 fancy-card visitor-info-card"
+                    className="card shadow-lg border-0 p-4 rounded-4 fancy-card visitor-info-card mb-4"
                     style={{
                       background: "#F2F2F2",
                       backdropFilter: "blur(10px)",
