@@ -1,11 +1,20 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { FaUserTie } from "react-icons/fa";
+import { useMsal } from "@azure/msal-react";
 
 import Navbar from "./navbar";
 import AdhocForm from "./AdhocForm";
 
 export default function Adhoc() {
+  const { accounts } = useMsal();
+  const currentAccount = Array.isArray(accounts) ? accounts[0] : null;
+  const displayUserName =
+    currentAccount?.name ||
+    currentAccount?.username ||
+    currentAccount?.localAccountId ||
+    "Unknown User";
+
   const [activeForm, setActiveForm] = useState(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
@@ -27,7 +36,7 @@ export default function Adhoc() {
 
   return (
     <div className="service-page d-flex flex-column min-vh-200 text-dark">
-      <Navbar />
+      <Navbar userName={displayUserName} />
 
       <div className="flex-grow-1 container py-4">
         <motion.div

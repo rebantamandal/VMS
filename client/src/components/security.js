@@ -84,11 +84,218 @@ const formatIST = (dateValue) => {
   });
 };
 
+// -----------------changed by rebanta--------------
+// New pass tracking utilities: IST-aware date key formatters, daily pass event accessors,
+// multi-day visit detection, per-card pass action state machine, and UI tone/label helpers
+const PASS_TRACKING_TIME_ZONE = "Asia/Kolkata";
+
+const passDateKeyFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: PASS_TRACKING_TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+const getPassDateKey = (value) => {
+  if (!value) return "";
+
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const parts = passDateKeyFormatter.formatToParts(date);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+
+  if (!year || !month || !day) return "";
+  return `${year}-${month}-${day}`;
+};
+
+const getDailyPassEvents = (visitor) => (
+  Array.isArray(visitor?.dailyPassEvents) ? visitor.dailyPassEvents : []
+);
+
+const isLongPeriodVisit = (visitor) => {
+  // Always use the scheduled inTime, not actualInTime — early authorization must
+  // not reclassify a single-day visit as a multi-day (pass-tracking) visit.
+  const startDateKey = getPassDateKey(visitor?.inTime);
+  const finalOutDateKey = getPassDateKey(visitor?.outTime);
+  return Boolean(startDateKey && finalOutDateKey && startDateKey < finalOutDateKey);
+};
+
+const isVisitorRecord = (visitor) => visitor?.source === "visitor";
+
+const isRepeatedVisitorType = (visitor) => visitor?.source !== "adhoc" && isLongPeriodVisit(visitor);
+
+const isFinalCheckoutDay = (visitor, now = new Date()) => {
+  // Derives whether current IST day is the scheduled final checkout day for repeated records.
+  const todayKey = getPassDateKey(now);
+  const finalOutDateKey = getPassDateKey(visitor?.outTime);
+  return Boolean(todayKey && finalOutDateKey && todayKey === finalOutDateKey);
+};
+
+const isAfterFinalCheckoutDay = (visitor, now = new Date()) => {
+  // Keeps a clear checkout path when a repeated record is still checked in after the final day.
+  const todayKey = getPassDateKey(now);
+  const finalOutDateKey = getPassDateKey(visitor?.outTime);
+  return Boolean(todayKey && finalOutDateKey && todayKey > finalOutDateKey);
+};
+
+const getPassTrackingMeta = (visitor, now = new Date()) => {
+  const enabled = isRepeatedVisitorType(visitor);
+  if (!enabled) {
+    return { enabled: false, canCheckout: false };
+  }
+
+  const todayKey = getPassDateKey(now);
+  const finalOutDateKey = getPassDateKey(visitor?.outTime);
+  const todayEvents = getDailyPassEvents(visitor).filter((event) => event?.dateKey === todayKey);
+  const issueToday = todayEvents.find((event) => event?.action === "issued");
+  const returnToday = todayEvents.find((event) => event?.action === "returned");
+  const alertSentToday =
+    isVisitorRecord(visitor) &&
+    Array.isArray(visitor?.dailyPassAlertDates) &&
+    visitor.dailyPassAlertDates.includes(todayKey);
+  const isFinalDay = Boolean(todayKey && finalOutDateKey && todayKey === finalOutDateKey);
+  const trackingActive =
+    visitor?.status === "checkedIn" &&
+    Boolean(todayKey && finalOutDateKey && todayKey <= finalOutDateKey);
+
+  if (visitor?.status !== "checkedIn") {
+    const isCheckedOut = visitor?.status === "checkedOut";
+    return {
+      enabled: true,
+      canIssue: false,
+      canReturn: false,
+      canCheckout: false,
+      tone: "secondary",
+      summary: isCheckedOut
+        ? "Visit completed and checked out."
+        : "Long-period visit record",
+      issueToday,
+      returnToday,
+    };
+  }
+
+  if (todayKey && finalOutDateKey && todayKey > finalOutDateKey) {
+    return {
+      enabled: true,
+      canIssue: false,
+      canReturn: false,
+      canCheckout: false,
+      tone: "secondary",
+      // Clarifies that pass actions are closed only after the visit window ends.
+      summary: "Visit window ended. Complete final Check Out if still pending.",
+      issueToday,
+      returnToday,
+    };
+  }
+
+  if (returnToday) {
+    if (isFinalDay) {
+      // On final day, after return, prompt checkout instead of return
+      return {
+        enabled: true,
+        canIssue: false,
+        canReturn: false,
+        canCheckout: true,
+        tone: "warning",
+        summary: `Final day pass returned at ${formatIST(returnToday.recordedAt)}. Complete check-out now.`,
+        issueToday,
+        returnToday,
+      };
+    }
+    return {
+      enabled: true,
+      canIssue: false,
+      canReturn: false,
+      canCheckout: false,
+      tone: "success",
+      summary: `Pass returned today at ${formatIST(returnToday.recordedAt)}.`,
+      issueToday,
+      returnToday,
+    };
+  }
+
+  if (issueToday) {
+    if (isFinalDay) {
+      return {
+        enabled: true,
+        canIssue: false,
+        canReturn: false,
+        canCheckout: true,
+        tone: "warning",
+        summary: `Final day pass issued at ${formatIST(issueToday.recordedAt)}. Complete check-out now.`,
+        issueToday,
+        returnToday,
+      };
+    }
+
+    return {
+      enabled: true,
+      canIssue: false,
+      canReturn: true,
+      canCheckout: false,
+      tone: alertSentToday ? "danger" : "warning",
+      summary: alertSentToday
+        ? `Alert sent. Today's pass was issued at ${formatIST(issueToday.recordedAt)} and is still pending return.`
+        : `Pass issued today at ${formatIST(issueToday.recordedAt)}. Awaiting return.`,
+      issueToday,
+      returnToday,
+    };
+  }
+
+  return {
+    enabled: true,
+    canIssue: trackingActive,
+    canReturn: false,
+    canCheckout: false,
+    tone: trackingActive ? "primary" : "secondary",
+    summary: trackingActive
+      ? isFinalDay
+        ? "Final day: issue today's pass, then complete checkout."
+        : "Ready to issue today's pass."
+      : "Pass tracking becomes active only while the visitor is checked in during the visit window.",
+    issueToday,
+    returnToday,
+  };
+};
+
+const isPassActionBusyForVisitor = (visitorId, passActionKey) => {
+  // Prevents duplicate pass clicks across card and details modal for the same record.
+  return Boolean(visitorId && passActionKey && passActionKey.startsWith(`${visitorId}:`));
+};
+// -------------------------------------------------
+
 // ✅ NEW: check if current time > tentative inTime + 24 hours
 const isOverdue24Hours = (v) => {
   if (!v?.inTime) return false;
   const inMs = new Date(v.inTime).getTime();
   return Date.now() > inMs + 24 * 60 * 60 * 1000;
+};
+
+// Groups dailyPassEvents into paired issue/return cycles, sorted newest first.
+const buildPassHistory = (visitor) => {
+  const events = Array.isArray(visitor?.dailyPassEvents) ? visitor.dailyPassEvents : [];
+  if (!events.length) return [];
+  const byDate = {};
+  events.forEach((e) => {
+    if (!byDate[e.dateKey]) byDate[e.dateKey] = { issues: [], returns: [] };
+    if (e.action === "issued") byDate[e.dateKey].issues.push(e);
+    else if (e.action === "returned") byDate[e.dateKey].returns.push(e);
+  });
+  const rows = [];
+  Object.entries(byDate)
+    .sort(([a], [b]) => b.localeCompare(a))
+    .forEach(([dateKey, { issues, returns }]) => {
+      issues.sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
+      returns.sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
+      const count = Math.max(issues.length, returns.length);
+      for (let i = count - 1; i >= 0; i--) {
+        rows.push({ dateKey, cycle: i + 1, issueEvent: issues[i] || null, returnEvent: returns[i] || null });
+      }
+    });
+  return rows;
 };
 
 const isCheckoutOlderThanWeek = (v) => {
@@ -114,6 +321,10 @@ export default function Security() {
   const [showConsent, setShowConsent] = useState(false);
   const [showCheckout, setShowCheckout] = useState(false);
   const [showBadgeEdit, setShowBadgeEdit] = useState(false);
+  // -----------------changed by rebanta--------------
+  // New: tracks in-flight pass action key to disable duplicate button clicks
+  const [passActionKey, setPassActionKey] = useState("");
+  // -------------------------------------------------
   const [currentVisitor, setCurrentVisitor] = useState(null);
   const [badgeEditVisitor, setBadgeEditVisitor] = useState(null);
   const [badgeNo, setBadgeNo] = useState("");
@@ -126,7 +337,6 @@ export default function Security() {
     hostApproved: false,
   });
 
-  const [sortOrder] = useState("asc");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [quickFilter, setQuickFilter] = useState("none");
@@ -250,7 +460,7 @@ export default function Security() {
     setFilteredVisitors(result);
     setExportFilteredVisitors(exportResult);
     //--------------------------changed by rebanta------------------------------//
-  }, [visitors, statusFilter, searchQuery, sortOrder, dateFrom, dateTo, quickFilter, nowTick]); // ✅ CHANGED
+  }, [visitors, statusFilter, searchQuery, dateFrom, dateTo, quickFilter, nowTick]);
 
 
   //--------------------------changed by rebanta------------------------------//
@@ -345,6 +555,64 @@ export default function Security() {
       Swal.fire("Update failed", err.message, "error");
     }
   };
+
+  // -----------------changed by rebanta--------------
+  // New: records daily pass issue/return events to backend; syncs details modal record state;
+  // handles already-recorded responses gracefully without surfacing errors to the user
+  const recordDailyPassEvent = async (visitor, action) => {
+    if (!visitor?._id || visitor.source === "adhoc") return;
+
+    const api = process.env.REACT_APP_API_URL;
+    const endpoint =
+      visitor.source === "guest"
+        ? `${api}/api/guests/${visitor._id}/pass-events`
+        : `${api}/api/visitors/${visitor._id}/pass-events`;
+
+    const actionKey = `${visitor._id}:${action}`;
+    setPassActionKey(actionKey);
+
+    try {
+      const response = await axios.post(endpoint, {
+        action,
+        recordedBy: "Security",
+      });
+
+      const responseBody = response.data || {};
+      const updatedRecord = responseBody.guest || responseBody.visitor || responseBody;
+      if (detailsVisitor?._id === visitor._id && updatedRecord?._id) {
+        setDetailsVisitor({ ...updatedRecord, source: visitor.source });
+      }
+
+      await fetchVisitors();
+
+      if (responseBody.alreadyRecorded) {
+        Swal.fire({
+          icon: "info",
+          title: "Already recorded",
+          text: responseBody.message || "This pass action is already recorded for today.",
+          timer: 1600,
+          showConfirmButton: false,
+        });
+      } else {
+        Swal.fire({
+          icon: "success",
+          title: action === "issued" ? "Pass issued" : "Pass returned",
+          text: responseBody.message || "Pass action saved.",
+          timer: 1200,
+          showConfirmButton: false,
+        });
+      }
+    } catch (err) {
+      Swal.fire(
+        "Pass update failed",
+        err.response?.data?.error || err.message,
+        "error"
+      );
+    } finally {
+      setPassActionKey("");
+    }
+  };
+  // -------------------------------------------------
 
   // ✅ NEW: Remove visitor from UI for ALL users (end-to-end)
 // Calls backend: PUT /api/{visitors|guests|adhoc}/:id/remove-ui
@@ -596,6 +864,22 @@ const getExpiryDate = () => {
   };
   //-----------------------Changes by Anup----------------------------------------------------------------------------------------------------
 
+  // -----------------changed by rebanta--------------
+  // New: keeps the details modal record in sync after each 5 s background fetch refresh
+  useEffect(() => {
+    // Keeps the open details modal in sync with the latest fetched record state.
+    if (!showDetails || !detailsVisitor?._id) return;
+
+    const refreshedDetailsVisitor = visitors.find(
+      (visitor) => visitor._id === detailsVisitor._id && visitor.source === detailsVisitor.source
+    );
+
+    if (refreshedDetailsVisitor) {
+      setDetailsVisitor(refreshedDetailsVisitor);
+    }
+  }, [visitors, showDetails, detailsVisitor]);
+  // -------------------------------------------------
+
   const isGuestSource = (src) => src === "guest";
 
 const getConsentSalutation = (v) => {
@@ -661,7 +945,6 @@ const getConsentLabel = (v) => {
 
 
     const isGuest = visitor.source === "guest";
-    // const hostName = visitor.submittedBy || "-";
 
     const printContent = `
     <div class="visitor-card">
@@ -976,7 +1259,7 @@ const getConsentLabel = (v) => {
         </div>
 
         {/* ✅ FIX: all 4 counts now use countVisitors — stable regardless of active filter tab */}
-        <div className="d-flex justify-content-center gap-2 mb-2 flex-wrap align-items-center">
+        <div className="d-flex justify-content-center gap-2 mb-5 flex-wrap align-items-center">
           <button
             className={`btn btn-sm rounded-pill px-4 ${statusFilter === "all" ? "btn-dark" : "btn-outline-dark"}`}
             onClick={() => setStatusFilter("all")}
@@ -1001,6 +1284,7 @@ const getConsentLabel = (v) => {
           >
             Checked Out ({countVisitors.filter((v) => v.status === "checkedOut").length})
           </button>
+          {/* -----------------changed by rebanta-------------- */}
           {/* info icon with tooltip explaining 7-day filter */}
           <span
             title="Only records checked out within the last 7 days are shown on screen. For older records, use Export to Excel."
@@ -1021,7 +1305,46 @@ const getConsentLabel = (v) => {
                 </p>
               </div>
             ) : (
-              filteredVisitors.map((v, i) => (
+              // -----------------changed by rebanta--------------
+              // Refactored map to block body: per-card pass-tracking state derived from shared
+              // nowTick so all date-sensitive UI (chips, buttons, panels) refresh together
+              filteredVisitors.map((v, i) => {
+                // Uses the shared time tick so date-based actions update consistently in the UI.
+                const guardNow = new Date(nowTick);
+                const passTracking = getPassTrackingMeta(v, guardNow);
+                const isRepeatedRecord = isRepeatedVisitorType(v);
+                const isPassActionBusy = isPassActionBusyForVisitor(v._id, passActionKey);
+                // Final-day (after return) and post-final-day repeated records should be checkout-only.
+                const isFinalDayRepeated = isRepeatedRecord && isFinalCheckoutDay(v, guardNow);
+                const isAfterFinalDayRepeated = isRepeatedRecord && isAfterFinalCheckoutDay(v, guardNow);
+                const canFinalizeRepeatedToday =
+                  isFinalDayRepeated && (!passTracking.issueToday || Boolean(passTracking.returnToday));
+                const showOnlyCheckout = canFinalizeRepeatedToday || isAfterFinalDayRepeated;
+                const basicJourneyEnabled = !passTracking.enabled;
+                const basicCanAuthorize = basicJourneyEnabled && v.status === "new";
+                const basicStep1State = v.status === "new" ? "next-slate" : "done-slate";
+                const basicStep2State = v.status === "checkedIn" || v.status === "checkedOut" ? "done-teal" : "idle";
+                const basicCanCheckout = basicJourneyEnabled && v.status === "checkedIn";
+                const basicStep3State = v.status === "checkedOut" ? "final-dark" : basicCanCheckout ? "next-checkout" : "idle";
+                const basicStep1Label = basicCanAuthorize ? "Authorize" : "Authorized";
+                const basicStep3Label = v.status === "checkedOut" ? "Complete" : "Check-Out";
+                const basicAccentColor =
+                  basicCanAuthorize
+                    ? "#2563eb"
+                    : basicCanCheckout
+                      ? "#f59e0b"
+                      : v.status === "checkedOut"
+                        ? "#f59e0b"
+                        : "#14b8a6";
+                const basicSummary =
+                  v.status === "checkedOut"
+                    ? "Visit completed successfully."
+                    : v.status === "checkedIn"
+                      ? "Visitor is currently on site."
+                      : "Use Authorize to approve and capture consent before check-in.";
+                // -------------------------------------------------
+
+                return (
                 <motion.div
                   key={v._id}
                   className="col-md-4 mb-3"
@@ -1030,7 +1353,7 @@ const getConsentLabel = (v) => {
                   transition={{ delay: i * 0.1 }}
                 >
                   <div
-                    className="card shadow-lg border-0 p-4 rounded-4 fancy-card"
+                    className="card shadow-lg border-0 p-4 rounded-4 fancy-card visitor-info-card mb-4"
                     style={{
                       background: "#F2F2F2",
                       backdropFilter: "blur(10px)",
@@ -1055,98 +1378,318 @@ const getConsentLabel = (v) => {
                       <FaUser className="me-2" />
                       {v.firstName} {v.lastName}
                     </h4>
-                    <p>
-                      <FaBuilding className="me-2" />
-                      <b>Category: {v.category || "-"}</b> 
-                    </p>
-                    <p>
-                      <FaUser className="me-2" />
-                      <b>Host:</b> {v.host || "-"}
-                    </p>
-                    <p>
-                      <FaQuestion className="me-2" />
-                      <b>Purpose:</b> {v.purposeOfVisit || "-"}
-                    </p>
-                    <p>
-                      <FaMapMarkerAlt className="me-2 text-danger" />
-                      <b>Company:</b> {v.company || "-"}
-                    </p>
+                    <div className="visitor-meta">
+                      <p className="visitor-meta-row">
+                        <FaBuilding className="me-2" />
+                        <b>Category: {v.category || "-"}</b>
+                      </p>
+                      <p className="visitor-meta-row">
+                        <FaUser className="me-2" />
+                        <b>Host:</b> {v.host || "-"}
+                      </p>
+                      <p className="visitor-meta-row">
+                        <FaQuestion className="me-2" />
+                        <b>Purpose:</b> {v.purposeOfVisit || "-"}
+                      </p>
+                      <p className="visitor-meta-row">
+                        <FaMapMarkerAlt className="me-2 text-danger" />
+                        <b>Company:</b> {v.company || "-"}
+                      </p>
+                      <p className="visitor-meta-row">
+                        <FaIdBadge className="me-2" />
+                        <b>Visitor ID:</b> {v.cardNo || "-"}
+                      </p>
+                      <p className="visitor-meta-row">
+                        <FaClock className="me-2 text-info" />
+                        <b>Tentative In:</b> {v.inTime ? new Date(v.inTime).toLocaleString() : "-"}
+                      </p>
+                      <p className="visitor-meta-row">
+                        <FaClock className="me-2 text-info" />
+                        <b>Tentative Out:</b> {v.outTime ? new Date(v.outTime).toLocaleString() : "-"}
+                      </p>
+                      <p className="visitor-meta-row">
+                        <FaClock className="me-2 text-success" />
+                        <b>Actual Check-In:</b> {v.actualInTime ? new Date(v.actualInTime).toLocaleString() : "-"}
+                      </p>
+                      <p className="visitor-meta-row visitor-status-row">
+                        <b>Status:</b> <span className="badge bg-dark rounded-pill px-3">{v.status?.toUpperCase()}</span>
+                      </p>
+                    </div>
 
-                    <p>
-                      <FaIdBadge className="me-2" />
-                      <b>Visitor ID:</b> {v.cardNo || "-"}
-                    </p>
-                    <p>
-                      <FaClock className="me-2 text-info" />
-                      <b>Tentative In:</b> {v.inTime ? new Date(v.inTime).toLocaleString() : "-"}
-                    </p>
-                    <p>
-                      <FaClock className="me-2 text-info" />
-                      <b>Tentative Out:</b> {v.outTime ? new Date(v.outTime).toLocaleString() : "-"}
-                    </p>
-                    <p>
-                      <FaClock className="me-2 text-success" />
-                      <b>Actual Check-In:</b> {v.actualInTime ? new Date(v.actualInTime).toLocaleString() : "-"}
-                    </p>
-                    <p>
-                      <b>Status:</b> <span className="badge bg-dark rounded-pill px-3">{v.status?.toUpperCase()}</span>
-                    </p>
-
-                    {v.displaySignature && (
-                      <div className="text-center my-2">
-                        <img src={v.displaySignature} alt="signature" width={150} className="border rounded p-2" />
-                        <p className="text-success small">✔ Signed (Encrypted)</p>
+                    {basicJourneyEnabled && (
+                      <div className="visit-stage-wrapper mb-3" style={{ borderLeftColor: basicAccentColor }}>
+                        <div className="pass-track-eyebrow">Visit Journey</div>
+                        <div className="pass-step-rail visit-step-rail">
+                          <div className="pass-step-col">
+                            <div
+                              className={`pass-step-circle ${basicStep1State === "done-slate" ? "psc-done-slate" : "psc-next-slate"} ${basicCanAuthorize ? "pass-step-circle-actionable" : ""}`}
+                              onClick={basicCanAuthorize ? () => openConsent(v) : undefined}
+                              title={basicCanAuthorize ? "Authorize" : undefined}
+                              style={{ cursor: basicCanAuthorize ? "pointer" : "default" }}
+                            >
+                              {basicStep1State === "done-slate" ? "✓" : "1"}
+                            </div>
+                            <div className="pass-step-lbl pass-step-lbl-await">{basicStep1Label}</div>
+                          </div>
+                          <div className={`pass-step-line ${v.status !== "new" ? "psl-slate" : "psl-idle"}`} />
+                          <div className="pass-step-col">
+                            <div className={`pass-step-circle ${basicStep2State === "current-teal" ? "psc-current-teal" : basicStep2State === "done-teal" ? "psc-done-teal" : "psc-idle"}`}>
+                              {basicStep2State === "done-teal" ? "✓" : "2"}
+                            </div>
+                            <div className="pass-step-lbl pass-step-lbl-onsite">Checked In</div>
+                          </div>
+                          <div className={`pass-step-line ${v.status === "checkedOut" ? "psl-teal" : "psl-idle"}`} />
+                          <div className="pass-step-col">
+                            <div
+                              className={`pass-step-circle ${basicStep3State === "final-dark" ? "psc-final-dark" : basicStep3State === "next-checkout" ? "psc-next-checkout" : "psc-idle"} ${basicCanCheckout ? "pass-step-circle-actionable" : ""}`}
+                              onClick={basicCanCheckout ? () => openCheckout(v) : undefined}
+                              title={basicCanCheckout ? "Check-Out" : undefined}
+                              style={{ cursor: basicCanCheckout ? "pointer" : "default" }}
+                            >
+                              {v.status === "checkedOut" ? "✓" : "3"}
+                            </div>
+                            <div className="pass-step-lbl pass-step-lbl-closed">{basicStep3Label}</div>
+                          </div>
+                        </div>
+                        <div className="pass-step-summary">
+                          <span className="pass-summary-dot visitor-summary-dot-basic" />
+                          {basicSummary}
+                        </div>
                       </div>
                     )}
 
+                    {passTracking.enabled && (() => {
+                      const schedStartKey = getPassDateKey(v.inTime);
+                      const startKey = getPassDateKey(v.actualInTime || v.inTime);
+                      const endKey = getPassDateKey(v.outTime);
+                      const todayKey = getPassDateKey(guardNow);
+                      let arcDayN = 1, arcTotal = 1;
+                      if (schedStartKey && endKey) {
+                        const msPerDay = 86400000;
+                        const schedStartMs = new Date(schedStartKey + "T12:00:00Z").getTime();
+                        const startMs = new Date(startKey + "T12:00:00Z").getTime();
+                        const endMs = new Date(endKey + "T12:00:00Z").getTime();
+                        const todayMs = new Date(todayKey + "T12:00:00Z").getTime();
+                        arcTotal = Math.max(1, Math.round((endMs - schedStartMs) / msPerDay) + 1);
+                        arcDayN = Math.max(1, Math.min(Math.round((todayMs - startMs) / msPerDay) + 1, arcTotal));
+                      }
+                      const R = 26, cx = 32, cy = 32;
+                      const circ = 2 * Math.PI * R;
+                      const arcFilled = circ * Math.min(arcDayN / arcTotal, 1);
+
+                      // isAuthorizeMode must be based on status only — arcDayN can be > 1
+                      // for a visitor whose inTime was yesterday but still not authorized.
+                      const isAuthorizeMode = v.status === "new";
+                      const step1State = passTracking.issueToday
+                        ? "done"
+                        : isAuthorizeMode
+                          ? "next-slate"
+                          : passTracking.canIssue
+                            ? "next-issue"
+                            : "idle";
+                      const isFinalDayNow = isFinalCheckoutDay(v, guardNow);
+                      // On final day, replace return with checkout (no return step)
+                      const isFinalDayOrAfter = isFinalCheckoutDay(v, guardNow);
+                      let step2State;
+                      if (isFinalDayOrAfter) {
+                        step2State = passTracking.canCheckout ? "next-checkout" : v.status === "checkedOut" ? "done" : "idle";
+                      } else {
+                        step2State = passTracking.returnToday
+                          ? "done"
+                          : passTracking.canCheckout
+                            ? "next-checkout"
+                            : passTracking.canReturn
+                              ? "next-return"
+                              : "idle";
+                      }
+
+                      const conn1Done = Boolean(passTracking.issueToday);
+                      const conn2Done = isFinalDayOrAfter
+                        ? Boolean(passTracking.returnToday || passTracking.canCheckout)
+                        : Boolean(passTracking.returnToday || passTracking.canCheckout);
+                      const canCheckoutFromPassRail =
+                        (passTracking.canCheckout || showOnlyCheckout) && v.status === "checkedIn";
+                      // Remove Next Day step for repeated records
+                      let step3State = canCheckoutFromPassRail
+                        ? "next-checkout"
+                        : conn2Done
+                          ? (isFinalDayNow ? "final" : "done")
+                          : "upcoming";
+                      let step3Label = canCheckoutFromPassRail ? "Check-Out" : (isFinalDayNow ? "Complete" : "Next Day");
+                      if (isRepeatedRecord) {
+                        // For repeated records, remove the Next Day step entirely
+                        // But on final day after return, show checkout option in progress bar
+                        if (isFinalDayNow && conn2Done) {
+                          step3State = "next-checkout";
+                          step3Label = "Check-Out";
+                        } else {
+                          step3State = null;
+                          step3Label = null;
+                        }
+                      }
+                      // Set left accent to green after return
+                      let accentColor = "#64748b";
+                      if (canCheckoutFromPassRail) {
+                        accentColor = "#f59e0b";
+                      } else if (step2State === "next-return") {
+                        accentColor = "#f59e0b";
+                      } else if (conn2Done) {
+                        accentColor = "#14b8a6"; // green after return
+                      } else if (step1State === "next-slate" || step1State === "next-issue") {
+                        accentColor = "#2563eb";
+                      }
+
+                      return (
+                        <div className="pass-track-wrapper mb-3" style={{ borderLeftColor: accentColor }}>
+                          <div className="pass-arc-ring">
+                            <svg width="64" height="64" viewBox="0 0 64 64" aria-label={`Day ${arcDayN} of ${arcTotal}`}>
+                              {/* Track */}
+                              <circle cx={cx} cy={cy} r={R} fill="none" stroke="#eef2f8" strokeWidth="5" />
+                              {/* White inner disc so text always reads cleanly */}
+                              <circle cx={cx} cy={cy} r={R - 7} fill="white" />
+                              {/* Progress arc */}
+                              <circle
+                                cx={cx}
+                                cy={cy}
+                                r={R}
+                                fill="none"
+                                stroke={accentColor}
+                                strokeWidth="5.5"
+                                strokeDasharray={`${arcFilled} ${circ}`}
+                                strokeLinecap="round"
+                                transform={`rotate(-90 ${cx} ${cy})`}
+                              />
+                              <text x={cx} y="20" textAnchor="middle" dominantBaseline="middle" fontSize="6.5" fontWeight="800" fill="#94a3b8" letterSpacing="1">DAY</text>
+                              <text x={cx} y="31" textAnchor="middle" dominantBaseline="middle" fontSize="15" fontWeight="900" fill="#0f172a">{arcDayN}</text>
+                              <line x1="20" y1="37" x2="44" y2="37" stroke="#dde3ec" strokeWidth="1.2" />
+                              <text x={cx} y="44" textAnchor="middle" dominantBaseline="middle" fontSize="10.5" fontWeight="700" fill="#64748b">{arcTotal}</text>
+                            </svg>
+                          </div>
+
+                          <div className="pass-track-eyebrow">Daily Pass</div>
+
+                          <div className="pass-step-rail">
+                            <div className="pass-step-col">
+                              <div
+                                className={`pass-step-circle ${step1State === "done" ? "psc-done psc-issue-node" : step1State === "next-slate" ? "psc-next-slate pass-step-circle-actionable" : `psc-${step1State} psc-issue-node`} ${step1State === "next-issue" ? "pass-step-circle-actionable" : ""}`}
+                                onClick={
+                                  step1State === "next-slate"
+                                    ? () => openConsent(v)
+                                    : step1State === "next-issue" && !isPassActionBusy
+                                      ? () => recordDailyPassEvent(v, "issued")
+                                      : undefined
+                                }
+                                title={step1State === "next-slate" ? "Authorize" : step1State === "next-issue" ? "Issue Pass" : undefined}
+                                style={{ cursor: (step1State === "next-slate" || step1State === "next-issue") ? "pointer" : "default" }}
+                              >
+                                {step1State === "done" ? "✓" : "1"}
+                              </div>
+                              <div className="pass-step-lbl pass-step-lbl-issue">{isAuthorizeMode ? "Authorize" : "Issue"}</div>
+                            </div>
+                            <div className={`pass-step-line ${conn1Done ? "psl-done psl-after-issue" : "psl-idle"}`} />
+
+                            <div className="pass-step-col">
+                              <div
+                                className={`pass-step-circle psc-${step2State} psc-return-node ${(step2State === "next-return" || step2State === "next-checkout") ? "pass-step-circle-actionable" : ""}`}
+                                onClick={
+                                  step2State === "next-checkout"
+                                    ? () => openCheckout(v)
+                                    : step2State === "next-return" && !isPassActionBusy
+                                      ? () => recordDailyPassEvent(v, "returned")
+                                      : undefined
+                                }
+                                title={
+                                  step2State === "next-checkout"
+                                    ? "Check-Out"
+                                    : step2State === "next-return"
+                                      ? "Return Pass"
+                                      : undefined
+                                }
+                                style={{ cursor: (step2State === "next-return" || step2State === "next-checkout") ? "pointer" : "default" }}
+                              >
+                                {step2State === "done" ? "✓" : "2"}
+                              </div>
+                              <div className="pass-step-lbl pass-step-lbl-return">
+                                {isFinalCheckoutDay(v, guardNow)
+                                  ? (v.status === "checkedOut" ? "Complete" : "Check-Out")
+                                  : step2State === "next-checkout"
+                                    ? "Check-Out"
+                                    : "Return"}
+                              </div>
+                            </div>
+                            {/* Hide the arrow connector after the second step for repeated records */}
+                            {(!isRepeatedRecord) && (
+                              <div className={`pass-step-line ${conn2Done ? "psl-done psl-after-return" : "psl-idle"}`} />
+                            )}
+
+                            {(!isRepeatedRecord) && (
+                              <div className="pass-step-col">
+                                <div
+                                  className={`pass-step-circle psc-${step3State} psc-next-node ${canCheckoutFromPassRail ? "pass-step-circle-actionable" : ""}`}
+                                  onClick={canCheckoutFromPassRail ? () => openCheckout(v) : undefined}
+                                  title={canCheckoutFromPassRail ? "Check-Out" : undefined}
+                                  style={{ cursor: canCheckoutFromPassRail ? "pointer" : "default" }}
+                                >
+                                  {step3State === "done" || step3State === "final" ? "✓" : "→"}
+                                </div>
+                                <div className="pass-step-lbl pass-step-lbl-next">{step3Label}</div>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="pass-step-summary">
+                            <span className="pass-summary-dot" style={{ background: accentColor }} />
+                            {passTracking.summary}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* -----------------changed by rebanta-------------- */}
+                    {/* Explanation: Signature preview + caption use dedicated classes so spacing stays
+                        uniform with nearby progress and action sections. */}
+                    {v.displaySignature && (
+                      <div className="signature-block">
+                        <img src={v.displaySignature} alt="signature" width={150} className="signature-preview" />
+                        <p className="signature-caption">✔ Signed (Encrypted)</p>
+                      </div>
+                    )}
+                    {/* ------------------------------------------------- */}
+
                     {v.status === "new" && (
-  <div className="text-center d-flex justify-content-center gap-2 flex-wrap">
-    <button className="btn btn-dark btn-sm rounded-pill" onClick={() => openConsent(v)}>
-      Authorize
-    </button>
-    {/*----------------------------------Changes by Anup----------------------------------------------------------------------- */}
-    <button className="btn btn-outline-dark btn-sm rounded-pill" onClick={() => openDetails(v)}>
-      View Details   {/*This is what the user will see on the cards of the security page */}
-    </button>
-    {/*----------------------------------Changes by Anup----------------------------------------------------------------------- */}
-
-
-    {/* ✅ NEW: show Remove only if overdue */}
-    {isOverdue24Hours(v) && (
-      <button
-        className="btn btn-danger btn-sm rounded-pill"
-        onClick={() => removeFromUI(v)}
-      >
-        Remove
-      </button>
-    )}
-  </div>
-)}
-
+                      <div className="text-center d-flex justify-content-center gap-2 flex-wrap card-action-row">
+                        <button className="btn btn-outline-dark btn-sm rounded-pill" onClick={() => openDetails(v)}>
+                          View Details
+                        </button>
+                        {isOverdue24Hours(v) && (
+                          <button
+                            className="btn btn-danger btn-sm rounded-pill"
+                            onClick={() => removeFromUI(v)}
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                    )}
 
                     {v.status === "checkedIn" && (
-                      <div className="d-flex justify-content-center gap-2 mt-3 flex-wrap">
+                      <div className="d-flex justify-content-center gap-2 flex-wrap card-action-row">
                         <button className="btn btn-outline-primary btn-sm rounded-pill" onClick={() => handleBadgeEditOpen(v)}>
                           <FaEdit className="me-1" /> Edit Badge
                         </button>
                         <button className="btn btn-outline-dark btn-sm rounded-pill" onClick={() => printCard(v)}>
                           <FaPrint className="me-1" /> Print Card
                         </button>
-
-                        {/*----------------------------------Changes by Anup----------------------------------------------------------------------- */}
                         <button className="btn btn-outline-dark btn-sm rounded-pill" onClick={() => openDetails(v)}>
-                          View Details   {/*This is what the user will see on the cards of the security page */}
-                        </button>
-                        {/*----------------------------------Changes by Anup----------------------------------------------------------------------- */}
-
-                        <button className="btn btn-warning btn-sm rounded-pill" onClick={() => openCheckout(v)}>
-                          Check Out
+                          View Details
                         </button>
                       </div>
                     )}
+                    {/* ------------------------------------------------- */}
                   </div>
                 </motion.div>
-              ))
+                );
+              })
             )}
           </div>
         )}
@@ -1478,84 +2021,117 @@ const getConsentLabel = (v) => {
       </AnimatePresence>
 
       {/*----------------------------------Changes by Anup----------------------------------------------------------------------- */}
-      <AnimatePresence> {/*runs if and only if showDetails is true and detailsVisitor contains data */}
-        {showDetails && detailsVisitor && (
-          <motion.div
-            className="modal show d-block"
-            style={{ background: "rgba(0,0,0,0.6)" }}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
-            <div className="modal-dialog modal-dialog-centered modal-lg">
-              <div className="modal-content p-4 rounded-4">
+      <AnimatePresence>
+        {showDetails && detailsVisitor && (() => {
+          const detailsCanCheckout = detailsVisitor.status === "checkedIn" && isRepeatedVisitorType(detailsVisitor);
+          const passHistory = buildPassHistory(detailsVisitor);
+          return (
+            <motion.div
+              className="modal show d-block"
+              style={{ background: "rgba(0,0,0,0.6)" }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <div className="modal-dialog modal-dialog-centered modal-lg">
+                <div className="modal-content p-4 rounded-4">
 
-                <h3 className="text-center fw-bold mb-4">
-                  {detailsVisitor?.source === "guest" ? "Guest Details" : detailsVisitor?.source === "adhoc" ? "Adhoc Visitor Details" : "Visitor Details"}
-                </h3> {/* this is used to figure out what type of visitor is */}
+                  <h3 className="text-center fw-bold mb-4">
+                    {detailsVisitor?.source === "guest" ? "Guest Details" : detailsVisitor?.source === "adhoc" ? "Adhoc Visitor Details" : "Visitor Details"}
+                  </h3>
 
-                <div className="row">
-
-                  <div className="col-md-6 mb-2">
-                    <b>Phone Number:</b><br />
-                    {detailsVisitor.phone || "-"}
-                  </div>
-
-                  <div className="col-md-6 mb-2">
-                    <b>Email:</b><br />
-                    {detailsVisitor.email || "-"}
-                  </div>
-
-                  <div className="col-md-6 mb-2">
-                    <b>Meeting Room:</b><br />
-                    {detailsVisitor?.source === "adhoc" ? "-" : detailsVisitor.meetingRoom || "-"}
-                  </div>
-
-                  {/* Laptop serial ONLY for visitors */}
-                  {detailsVisitor.source !== "guest" && (
+                  <div className="row">
                     <div className="col-md-6 mb-2">
-                      <b>Laptop Serial No:</b><br />
-                      {detailsVisitor.laptopSerial || "-"}
+                      <b>Phone Number:</b><br />
+                      {detailsVisitor.phone || "-"}
                     </div>
-                  )}
-
-                  {/* Refreshments ONLY for guests */}
-                  {detailsVisitor.source === "guest" && (
-                    <>
+                    <div className="col-md-6 mb-2">
+                      <b>Email:</b><br />
+                      {detailsVisitor.email || "-"}
+                    </div>
+                    <div className="col-md-6 mb-2">
+                      <b>Meeting Room:</b><br />
+                      {detailsVisitor?.source === "adhoc" ? "-" : detailsVisitor.meetingRoom || "-"}
+                    </div>
+                    {detailsVisitor.source !== "guest" && (
                       <div className="col-md-6 mb-2">
-                        <b>Refreshments:</b><br />
-                        {detailsVisitor.refreshmentRequired ? "Yes" : "No"}
+                        <b>Laptop Serial No:</b><br />
+                        {detailsVisitor.laptopSerial || "-"}
                       </div>
+                    )}
+                    {detailsVisitor.source === "guest" && (
+                      <>
+                        <div className="col-md-6 mb-2">
+                          <b>Refreshments:</b><br />
+                          {detailsVisitor.refreshmentRequired ? "Yes" : "No"}
+                        </div>
+                        <div className="col-md-6 mb-2">
+                          <b>Refreshments Time:</b><br />
+                          {detailsVisitor.proposedRefreshmentTime ? new Date(detailsVisitor.proposedRefreshmentTime).toLocaleString("en-IN") : "-"}
+                        </div>
+                      </>
+                    )}
+                    <div className="col-md-6 mb-2">
+                      <b>Guest WiFi Required:</b><br />
+                      {detailsVisitor.guestWifiRequired ? "Yes" : "No"}
+                    </div>
+                  </div>
 
-                      <div className="col-md-6 mb-2">
-                        <b>Refreshments Time:</b><br />
-                        {detailsVisitor.proposedRefreshmentTime ? new Date(detailsVisitor.proposedRefreshmentTime).toLocaleString("en-IN") : "-"}
+                  {passHistory.length > 0 && (
+                    <>
+                      <hr className="my-3" />
+                      <h5 className="fw-bold mb-3">Pass History</h5>
+                      <div style={{ overflowX: "auto" }}>
+                        <table className="table table-sm table-bordered align-middle" style={{ fontSize: "0.82rem" }}>
+                          <thead className="table-light">
+                            <tr>
+                              <th>Date</th>
+                              <th>Issued At</th>
+                              <th>Returned At</th>
+                              <th>Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {passHistory.map((row, idx) => (
+                              <tr key={idx}>
+                                <td>{row.dateKey}</td>
+                                <td>{row.issueEvent ? formatIST(row.issueEvent.recordedAt) : "-"}</td>
+                                <td>{row.returnEvent ? formatIST(row.returnEvent.recordedAt) : "-"}</td>
+                                <td>
+                                  {row.returnEvent
+                                    ? <span className="badge bg-dark rounded-pill">Returned</span>
+                                    : <span className="badge bg-warning text-dark rounded-pill">Pending</span>}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
                     </>
                   )}
 
-                  <div className="col-md-6 mb-2">
-                    <b>Guest WiFi Required:</b><br />
-                    {detailsVisitor.guestWifiRequired ? "Yes" : "No"}
+                  <div className="text-center mt-4 d-flex justify-content-center gap-2">
+                    {detailsCanCheckout && (
+                      <button
+                        className="btn btn-warning btn-sm rounded-pill px-4"
+                        onClick={() => { setShowDetails(false); openCheckout(detailsVisitor); }}
+                      >
+                        Check Out (Optional)
+                      </button>
+                    )}
+                    <button
+                      className="btn btn-dark rounded-pill px-4"
+                      onClick={() => setShowDetails(false)}
+                    >
+                      Close
+                    </button>
                   </div>
 
-
-                  
                 </div>
-
-                <div className="text-center mt-4">
-                  <button
-                    className="btn btn-dark rounded-pill px-4"
-                    onClick={() => setShowDetails(false)} 
-                  >
-                    Close
-                  </button>
-                </div>
-
               </div>
-            </div>
-          </motion.div>
-        )}
+            </motion.div>
+          );
+        })()}
       </AnimatePresence>
       {/*----------------------------------Changes by Anup----------------------------------------------------------------------- */}
 
@@ -1571,12 +2147,361 @@ const getConsentLabel = (v) => {
           transform: translateY(-8px);
           box-shadow: 0 14px 28px rgba(0, 0, 0, 0.3);
         }
+        .pass-track-wrapper {
+          position: relative;
+          background: #ffffff;
+          border: 1px solid #dbe3ee;
+          border-left-width: 4px;
+          border-left-style: solid;
+          border-radius: 12px;
+          padding: 12px 14px 10px 14px;
+          box-shadow: 0 2px 6px rgba(15,23,42,0.04);
+          overflow: hidden;
+        }
+        .pass-track-wrapper::after {
+          display: none;
+        }
+        .pass-arc-ring {
+          position: absolute;
+          top: 8px;
+          right: 8px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          z-index: 1;
+          filter: drop-shadow(0 3px 10px rgba(15,23,42,0.14));
+        }
+        .pass-track-eyebrow {
+          font-size: 0.58rem;
+          font-weight: 800;
+          letter-spacing: 1px;
+          text-transform: uppercase;
+          color: #94a3b8;
+          margin-bottom: 8px;
+          padding-right: 80px;
+        }
+        /* Step rail */
+        .pass-step-rail {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          width: 100%;
+          max-width: 340px;
+          margin-left: auto;
+          margin-right: auto;
+          padding-right: 0;
+          padding-bottom: 0;
+        }
+        .pass-step-col {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 5px;
+          min-height: 62px;
+        }
+        .pass-step-rail:not(.visit-step-rail) .pass-step-col {
+          width: 62px;
+          flex: 1 1 0;
+        }
+        .pass-step-rail:not(.visit-step-rail) .pass-step-col:first-child,
+        .pass-step-rail:not(.visit-step-rail) .pass-step-col:nth-child(3),
+        .pass-step-rail:not(.visit-step-rail) .pass-step-line:nth-child(2),
+        .pass-step-rail:not(.visit-step-rail) .pass-step-line:nth-child(4) {
+          margin-left: -36px;
+        }
+        .pass-step-rail:not(.visit-step-rail) {
+          justify-content: space-between;
+          padding-right: 0;
+        }
+        .pass-step-circle {
+          width: 36px;
+          height: 36px;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 13px;
+          font-weight: 700;
+          border: 2px solid;
+          flex-shrink: 0;
+          transition: box-shadow 0.18s, transform 0.18s, border-color 0.18s;
+          user-select: none;
+        }
+        .pass-step-circle:hover {
+          transform: none;
+        }
+        .pass-step-circle-actionable {
+          box-shadow: none;
+        }
+        .psc-idle {
+          background: #eff6ff;
+          border-color: #bfdbfe;
+          color: #60a5fa;
+        }
+        .psc-upcoming {
+          background: #ffffff;
+          border: 2px dashed #60a5fa;
+          color: #2563eb;
+          box-shadow: none;
+        }
+        .psc-next-issue {
+          background: #ffffff;
+          border-color: #2563eb;
+          color: #1d4ed8;
+          animation: pscPulseBlue 1.85s ease-out infinite;
+        }
+        .psc-next-return {
+          background: #ffffff;
+          border-color: #f59e0b;
+          color: #d97706;
+          animation: pscPulseAmber 1.85s ease-out infinite;
+        }
+        .psc-next-checkout {
+          background: #ffffff;
+          border-color: #f59e0b;
+          color: #d97706;
+          animation: pscPulseYellow 1.85s ease-out infinite;
+        }
+        .psc-done {
+          background: #2563eb;
+          border-color: #1d4ed8;
+          color: #fff;
+          box-shadow: none;
+        }
+        .psc-issue-node.psc-done {
+          background: #2563eb;
+          border-color: #1d4ed8;
+          box-shadow: none;
+        }
+        .psc-return-node.psc-done {
+          background: #f59e0b;
+          border-color: #d97706;
+          box-shadow: none;
+        }
+        .psc-next-node.psc-done {
+          background: #2dd4bf;
+          border-color: #14b8a6;
+          box-shadow: none;
+        }
+        .psc-final {
+          background: #facc15;
+          border-color: #f59e0b;
+          color: #713f12;
+          box-shadow: none;
+        }
+        @keyframes pscPulseBlue {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(37,99,235,0.45); }
+          50%       { box-shadow: 0 0 0 9px rgba(37,99,235,0); }
+        }
+        @keyframes pscPulseAmber {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.5); }
+          50%       { box-shadow: 0 0 0 9px rgba(245,158,11,0); }
+        }
+        @keyframes pscPulseYellow {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(250,204,21,0.55); }
+          50%       { box-shadow: 0 0 0 10px rgba(250,204,21,0); }
+        }
+        .pass-step-lbl {
+          font-size: 0.58rem;
+          font-weight: 700;
+          color: #60a5fa;
+          letter-spacing: 0.4px;
+          text-transform: uppercase;
+        }
+        .pass-step-lbl-issue {
+          color: #0f172a;
+        }
+        .pass-step-lbl-return {
+          color: #0f172a;
+        }
+        .pass-step-lbl-next {
+          color: #0f172a;
+        }
+        .pass-step-line {
+          flex: 0 0 32px;
+          width: 32px;
+          height: 2px;
+          margin: 0 0.5vw;
+          margin-bottom: 22px;
+          border-radius: 999px;
+          position: relative;
+          background: var(--psl-color, #dbeafe);
+          transition: background 0.4s;
+        }
+        .pass-step-rail:not(.visit-step-rail) .pass-step-line {
+          flex: 0 0 32px;
+          width: 32px;
+          margin: 0 0.5vw;
+          margin-bottom: 24px;
+          background: #0f172a;
+        }
+        .pass-step-line::after {
+          content: "";
+          position: absolute;
+          top: 50%;
+          right: -5px;
+          width: 8px;
+          height: 8px;
+          transform: translateY(-50%);
+          background: #0f172a;
+          clip-path: polygon(0 0, 100% 50%, 0 100%);
+        }
+        .pass-step-rail:not(.visit-step-rail) .pass-step-line::after {
+          right: -4px;
+        }
+        .psl-done {
+          --psl-color: #2563eb;
+        }
+        .psl-after-issue {
+          --psl-color: #2563eb;
+        }
+        .psl-after-return {
+          --psl-color: #f59e0b;
+        }
+        .psl-idle {
+          --psl-color: #dbeafe;
+        }
+        .pass-step-summary {
+          display: flex;
+          align-items: flex-start;
+          gap: 6px;
+          font-size: 0.71rem;
+          color: #475569;
+          margin-top: 4px;
+          line-height: 1.45;
+          padding-right: 80px;
+        }
+        /* -----------------changed by rebanta-------------- */
+        /* Explanation: Keeps signature region and action rows vertically consistent across cards. */
+        .signature-block {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          row-gap: 6px;
+          margin: 10px 0;
+        }
+        .signature-preview {
+          display: block;
+          width: 150px;
+          max-width: 100%;
+          border: 1px solid #dbe3ee;
+          border-radius: 8px;
+          padding: 8px;
+          background: #ffffff;
+          margin: 0;
+        }
+        .signature-caption {
+          margin: 0;
+          font-size: 0.875rem;
+          line-height: 1.2;
+          color: #15803d;
+          font-weight: 400;
+        }
+        .card-action-row {
+          margin-top: 10px;
+        }
+        /* ------------------------------------------------- */
+        .pass-summary-dot {
+          width: 7px;
+          height: 7px;
+          border-radius: 50%;
+          flex-shrink: 0;
+          margin-top: 4px;
+        }
+        .visit-stage-wrapper {
+          background: #ffffff;
+          border: 1px solid #dbe3ee;
+          border-left-width: 4px;
+          border-left-style: solid;
+          border-radius: 12px;
+          padding: 10px 12px 9px;
+          box-shadow: none;
+        }
+        .visit-step-rail {
+          padding-right: 0;
+          justify-content: center;
+        }
+        .visit-step-rail .pass-step-col {
+          width: 86px;
+          flex: 0 0 86px;
+        }
+        .visit-step-rail .pass-step-line {
+          flex: 0 0 24px;
+          width: 24px;
+          background: #0f172a;
+        }
+        .psc-next-slate {
+          background: #ffffff;
+          border-color: #2563eb;
+          color: #1d4ed8;
+          animation: pscPulseBlue 1.85s ease-out infinite;
+        }
+        .psc-done-slate {
+          background: #2563eb;
+          border-color: #1d4ed8;
+          color: #fff;
+        }
+        .psc-current-teal {
+          background: #14b8a6;
+          border-color: #0d9488;
+          color: #fff;
+          animation: none;
+        }
+        .psc-done-teal {
+          background: #2dd4bf;
+          border-color: #14b8a6;
+          color: #fff;
+        }
+        .psc-final-dark {
+          background: #facc15;
+          border-color: #f59e0b;
+          color: #713f12;
+          box-shadow: none;
+        }
+        .psl-slate {
+          --psl-color: #2563eb;
+        }
+        .psl-teal {
+          --psl-color: #2dd4bf;
+        }
+        .pass-step-lbl-await {
+          color: #0f172a;
+        }
+        .pass-step-lbl-onsite {
+          color: #0f172a;
+        }
+        .pass-step-lbl-closed {
+          color: #0f172a;
+        }
+        .visitor-summary-dot-basic {
+          background: #2563eb;
+        }
         .consent-text {
           font-size: 14px;
           line-height: 1.6;
         }
         .consent-text ul {
           padding-left: 20px;
+        }
+        @media (max-width: 767.98px) {
+          .pass-track-wrapper {
+            padding-right: 14px;
+          }
+          .pass-track-eyebrow,
+          .pass-step-rail {
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            margin-bottom: 8px;
+          }
+          /* Center align for repeated records (2 steps only) */
+          .pass-step-rail .pass-step-col:only-child {
+            margin-left: auto;
+            margin-right: auto;
+          }
+            margin-bottom: 8px;
+          }
         }
       `}</style>
     </div>

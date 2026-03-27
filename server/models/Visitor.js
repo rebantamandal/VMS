@@ -1,5 +1,38 @@
 import mongoose from "mongoose";
 
+// -----------------changed by rebanta--------------
+// New embedded schema for daily pass issue/return history stored on each visitor record
+const dailyPassEventSchema = new mongoose.Schema(
+  {
+    action: {
+      type: String,
+      enum: ["issued", "returned"],
+      required: true,
+    },
+    dateKey: {
+      type: String,
+      required: true,
+    },
+    recordedAt: {
+      type: Date,
+      required: true,
+      default: Date.now,
+    },
+    recordedBy: {
+      type: String,
+      default: "Security",
+      trim: true,
+    },
+    badgeNoAtEvent: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+  },
+  { _id: false }
+);
+// -------------------------------------------------
+
 const visitorSchema = new mongoose.Schema(
   {
     category: {
@@ -88,6 +121,20 @@ const visitorSchema = new mongoose.Schema(
     },
 
     submittedBy: { type: String },
+
+    // -----------------changed by rebanta--------------
+    // New pass-tracking fields: dailyPassEvents stores issue/return history and
+    // dailyPassAlertDates records which IST dates already triggered a host alert
+    dailyPassEvents: {
+      type: [dailyPassEventSchema],
+      default: [],
+    },
+
+    dailyPassAlertDates: {
+      type: [String],
+      default: [],
+    },
+    // -------------------------------------------------
 
     /* =========================
        Reminder Tracking

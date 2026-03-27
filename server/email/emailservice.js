@@ -45,11 +45,41 @@ async function sendEmail(message) {
   }
 }
 
+// -----------------changed by rebanta--------------
+// Added email normalization helpers so downstream notification flows can resolve a valid
+// official host email from hostEmail, submittedBy, or host fields before sending alerts
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const normalizeEmail = (value) => {
+  const email = String(value || "").trim().toLowerCase();
+  return EMAIL_REGEX.test(email) ? email : "";
+};
+
+export const resolveOfficialHostEmail = (visitor) => {
+  const candidates = [
+    visitor?.hostEmail,
+    visitor?.submittedBy,
+    visitor?.host,
+  ];
+
+  for (const candidate of candidates) {
+    const email = normalizeEmail(candidate);
+    if (email) return email;
+  }
+
+  return "";
+};
+// -------------------------------------------------
+
 /* ====================== WIFI EMAIL ====================== */
 export async function sendGuestWifiEmail(visitor) {
   const name = `${visitor.firstName || ""} ${visitor.lastName || ""}`.trim() || "Visitor";
+  // -----------------changed by rebanta--------------
+  // Replaced formatIST helper usage with direct en-IN locale formatting and updated the
+  // greeting copy in the HTML template
   const inTime = visitor.inTime ? new Date(visitor.inTime).toLocaleString("en-IN") : "Not Provided";
   const outTime = visitor.outTime ? new Date(visitor.outTime).toLocaleString("en-IN") : "Not Provided";
+  // -------------------------------------------------
 
   const subject = "Guest Wi-Fi Access Request";
 
@@ -101,8 +131,11 @@ export async function sendGuestWifiEmail(visitor) {
 /* ====================== ADHOC WIFI EMAIL ====================== */
 export async function sendAdhocWifiEmail(visitor) {
   const name = `${visitor.firstName || ""} ${visitor.lastName || ""}`.trim() || "Visitor";
+  // -----------------changed by rebanta--------------
+  // Replaced formatIST helper usage with direct en-IN locale formatting for adhoc Wi-Fi requests
   const inTime = visitor.inTime ? new Date(visitor.inTime).toLocaleString("en-IN") : "Not Provided";
   const outTime = visitor.outTime ? new Date(visitor.outTime).toLocaleString("en-IN") : "Not Provided";
+  // -------------------------------------------------
 
   const subject = "Adhoc Visitor – Guest Wi-Fi Request";
 
@@ -158,8 +191,11 @@ export async function sendAdhocWifiEmail(visitor) {
 /* ====================== MEETING ROOM EMAIL ====================== */
 export async function sendMeetingRoomEmail(visitor) {
   const name = `${visitor.firstName || ""} ${visitor.lastName || ""}`.trim() || "Visitor";
+  // -----------------changed by rebanta--------------
+  // Replaced formatIST helper usage with direct en-IN locale formatting for meeting room requests
   const inTime = visitor.inTime ? new Date(visitor.inTime).toLocaleString("en-IN") : "Not Provided";
   const outTime = visitor.outTime ? new Date(visitor.outTime).toLocaleString("en-IN") : "Not Provided";
+  // -------------------------------------------------
 
   const subject = "Meeting Room Booking – Guest Request";
 
@@ -211,9 +247,12 @@ export async function sendMeetingRoomEmail(visitor) {
 /* ====================== REFRESHMENT EMAIL ====================== */
 export async function sendRefreshmentEmail(visitor) {
   const name = `${visitor.firstName || ""} ${visitor.lastName || ""}`.trim() || "Visitor";
+  // -----------------changed by rebanta--------------
+  // Replaced formatIST helper usage with direct en-IN locale formatting for refreshment requests
   const proposedTime = visitor.proposedRefreshmentTime
     ? new Date(visitor.proposedRefreshmentTime).toLocaleString("en-IN")
     : "Not Provided";
+  // -------------------------------------------------
 
   const subject = "Refreshment Request – Guest";
 
@@ -269,8 +308,11 @@ export async function sendOverstayEmailToHost({ type, visitor, toHostEmail }) {
 
   const name = `${visitor.firstName || ""} ${visitor.lastName || ""}`.trim() || "Visitor";
   const hostName = visitor.host || "Host";
+  // -----------------changed by rebanta--------------
+  // Replaced formatIST helper usage with direct locale formatting for overstay notifications
   const outTime = visitor.outTime ? new Date(visitor.outTime).toLocaleString("en-IN") : "N/A";
   const now = new Date().toLocaleString("en-IN");
+  // -------------------------------------------------
 
   const subject = `Overstay Alert: ${name} has exceeded scheduled check-out time`;
 
@@ -320,3 +362,127 @@ export async function sendOverstayEmailToHost({ type, visitor, toHostEmail }) {
 
   await sendEmail(message);
 }
+
+// -----------------changed by rebanta--------------
+// New: sends a daily pass return alert to the host when a repeated visitor/guest has an
+// issued pass for today but Security has not yet recorded the return action
+export async function sendDailyPassReturnAlertEmail({ type, visitor, toHostEmail, issuedAt, dateKey }) {
+  if (!toHostEmail) {
+    console.warn("⚠️ No host email provided; cannot send daily pass return alert.");
+    return;
+  }
+
+  const name = `${visitor.firstName || ""} ${visitor.lastName || ""}`.trim() || "Visitor";
+  const hostName = visitor.host || "Host";
+  const finalCheckout = visitor.outTime ? new Date(visitor.outTime).toLocaleString("en-IN") : "N/A";
+  const badgeNo = visitor.cardNo || "Not assigned";
+  const issueTime = issuedAt || "Recorded earlier today";
+
+  const subject = `Pass Return Alert: ${name} has not returned today's pass`;
+
+  const message = {
+    senderAddress: process.env.ACS_SENDER_EMAIL,
+    recipients: {
+      to: [
+        {
+          address: toHostEmail,
+          displayName: hostName,
+        },
+      ],
+      cc: [
+        {
+          address: "group.id.a383968@udtrucks.com",
+          displayName: "Security Team",
+        },
+      ],
+    },
+    content: {
+      subject,
+      html: `
+        <p>Hello <strong>${hostName}</strong>,</p>
+
+        <p>This is an automated reminder from <strong>Facilo</strong>.</p>
+
+        <p>
+          The ${type} <strong>${name}</strong> was issued a pass on <strong>${dateKey}</strong>, but Security has not yet recorded the pass return for today.
+        </p>
+
+        <p><b>Details:</b></p>
+        <ul>
+          <li><b>Name:</b> ${name}</li>
+          <li><b>Badge Number:</b> ${badgeNo}</li>
+          <li><b>Issued Today At:</b> ${issueTime}</li>
+          <li><b>Final Tentative Check-out:</b> ${finalCheckout}</li>
+        </ul>
+
+        <p>Please coordinate with Security if the pass has already been returned or if the visit needs to continue tomorrow.</p>
+
+        <p>Regards,<br/>UD Trucks India – VMS</p>
+      `,
+      plainText: `${subject} | Badge: ${badgeNo} | Issued: ${issueTime} | Final checkout: ${finalCheckout}`,
+    },
+  };
+
+  await sendEmail(message);
+}
+// -------------------------------------------------
+
+// -----------------changed by rebanta--------------
+// New: sends a checkout confirmation email to the resolved host address after a visitor
+// or guest is fully checked out, including tentative and actual checkout timestamps
+export async function sendCheckoutEmailToHost({ type = "visitor", visitor, toHostEmail }) {
+  if (!toHostEmail) {
+    console.warn("⚠️ No host official email provided; cannot send checkout notification.");
+    return;
+  }
+
+  const name = `${visitor.firstName || ""} ${visitor.lastName || ""}`.trim() || "Visitor";
+  const hostName = visitor.host || "Host";
+  const checkoutTime = visitor.actualOutTime
+    ? new Date(visitor.actualOutTime).toLocaleString("en-IN")
+    : new Date().toLocaleString("en-IN");
+  const inTime = visitor.inTime ? new Date(visitor.inTime).toLocaleString("en-IN") : "N/A";
+  const outTime = visitor.outTime ? new Date(visitor.outTime).toLocaleString("en-IN") : "N/A";
+
+  const subject = `${type === "visitor" ? "Visitor" : "Guest"} Checked Out: ${name}`;
+
+  const message = {
+    senderAddress: process.env.ACS_SENDER_EMAIL,
+    recipients: {
+      to: [
+        {
+          address: toHostEmail,
+          displayName: hostName,
+        },
+      ],
+    },
+    content: {
+      subject,
+      html: `
+        <p>Hello <strong>${hostName}</strong>,</p>
+
+        <p>This is an automated notification from <strong>Facilo</strong>.</p>
+
+        <p>
+          The ${type} <strong>${name}</strong> has been successfully checked out.
+        </p>
+
+        <p><b>Details:</b></p>
+        <ul>
+          <li><b>Name:</b> ${name}</li>
+          <li><b>Category:</b> ${visitor.category || "-"}</li>
+          <li><b>Company:</b> ${visitor.company || "-"}</li>
+          <li><b>Tentative In:</b> ${inTime}</li>
+          <li><b>Tentative Out:</b> ${outTime}</li>
+          <li><b>Actual Check-out:</b> ${checkoutTime}</li>
+        </ul>
+
+        <p>Regards,<br/>UD Trucks India – VMS</p>
+      `,
+      plainText: `${subject} | Actual check-out: ${checkoutTime}`,
+    },
+  };
+
+  await sendEmail(message);
+}
+// -------------------------------------------------

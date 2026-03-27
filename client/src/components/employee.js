@@ -1,14 +1,35 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { FaUserTie, FaUserFriends } from "react-icons/fa";
+// -----------------changed by rebanta--------------
+// Added MSAL import to derive the signed-in user name for the navbar profile pill
+import { useMsal } from "@azure/msal-react";
+// -------------------------------------------------
 
 import Navbar from "./navbar";
 import VisitorForm from "./VisitorForm";
 import GuestForm from "./GuestForm";
+// -----------------changed by rebanta--------------
+// Added profile modal import to support previous visitor/guest lookup and repeat flow
+import EmployeeProfileModal from "./EmployeeProfileModal";
+// -------------------------------------------------
 
 export default function Employee() {
   const [activeForm, setActiveForm] = useState(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  // -----------------changed by rebanta--------------
+  // New state and MSAL-derived identity: showProfile controls the profile modal, repeatDraft
+  // holds a single or batch repeat-selection payload, and displayUserName feeds navbar profile UI
+  const [showProfile, setShowProfile] = useState(false);
+  const [repeatDraft, setRepeatDraft] = useState(null);
+  const { accounts } = useMsal();
+  const currentAccount = Array.isArray(accounts) ? accounts[0] : null;
+  const displayUserName =
+    currentAccount?.name ||
+    currentAccount?.username ||
+    currentAccount?.localAccountId ||
+    "Unknown User";
+  // -------------------------------------------------
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
@@ -18,10 +39,30 @@ export default function Employee() {
 
   const iconSize = isMobile ? 20 : 60;
 
+  // -----------------changed by rebanta--------------
+  // Replaced simple form map with repeat-aware form props so profile-driven repeat actions can
+  // prefill VisitorForm or GuestForm and then clear the draft once consumed
   const forms = {
-    visitor: <VisitorForm isMobile={isMobile} setActiveForm={setActiveForm} />,
-    guest: <GuestForm isMobile={isMobile} setActiveForm={setActiveForm} />,
+    visitor: (
+      <VisitorForm
+        isMobile={isMobile}
+        setActiveForm={setActiveForm}
+        repeatSeed={repeatDraft?.type === "visitor" && !Array.isArray(repeatDraft.data) ? repeatDraft.data : null}
+        repeatBatch={repeatDraft?.type === "visitor" && Array.isArray(repeatDraft.data) ? repeatDraft.data : null}
+        onRepeatSeedConsumed={() => setRepeatDraft(null)}
+      />
+    ),
+    guest: (
+      <GuestForm
+        isMobile={isMobile}
+        setActiveForm={setActiveForm}
+        repeatSeed={repeatDraft?.type === "guest" && !Array.isArray(repeatDraft.data) ? repeatDraft.data : null}
+        repeatBatch={repeatDraft?.type === "guest" && Array.isArray(repeatDraft.data) ? repeatDraft.data : null}
+        onRepeatSeedConsumed={() => setRepeatDraft(null)}
+      />
+    ),
   };
+  // -------------------------------------------------
 
   const services = [
     { id: "visitor", label: "Visitor", icon: <FaUserTie size={iconSize} className="me-2" /> },
@@ -30,7 +71,34 @@ export default function Employee() {
 
   return (
     <div className="service-page d-flex flex-column min-vh-200 text-dark">
-      <Navbar />
+      {/* -----------------changed by rebanta-------------- */}
+      {/* Navbar now receives profileAction/profile metadata and current signed-in user name */}
+      <Navbar
+        profileAction={() => setShowProfile(true)}
+        profileLabel="Profile"
+        profileTooltip="Open previous visitors and guests for quick repeat"
+        userName={displayUserName}
+      />
+      {/* ------------------------------------------------- */}
+
+      {/* -----------------changed by rebanta-------------- */}
+      {/* New profile modal: lets employee reopen previous visitor/guest records and route the
+          selected single or multi-repeat payload into the correct form */}
+      <EmployeeProfileModal
+        show={showProfile}
+        onClose={() => setShowProfile(false)}
+        onRepeatSelect={(payload) => {
+          setShowProfile(false);
+          setRepeatDraft(payload);
+          setActiveForm(payload.type);
+        }}
+        onRepeatMultiSelect={(payload) => {
+          setShowProfile(false);
+          setRepeatDraft(payload);
+          setActiveForm(payload.type);
+        }}
+      />
+      {/* ------------------------------------------------- */}
 
       <div className="flex-grow-1 container py-4">
         <motion.div
@@ -54,7 +122,13 @@ export default function Employee() {
                   <motion.button
                     key={id}
                     className="service-btn"
-                    onClick={() => setActiveForm(activeForm === id ? null : id)}
+                    onClick={() => {
+                      // -----------------changed by rebanta--------------
+                      // Clears any pending repeat payload before manually toggling a form from the service grid
+                      setRepeatDraft(null);
+                      setActiveForm(activeForm === id ? null : id);
+                      // -------------------------------------------------
+                    }}
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
                   >
@@ -77,7 +151,13 @@ export default function Employee() {
               <div key={id}>
                 <motion.button
                   className="custom-btn d-flex align-items-center w-75"
-                  onClick={() => setActiveForm(activeForm === id ? null : id)}
+                  onClick={() => {
+                    // -----------------changed by rebanta--------------
+                    // Mirrors desktop behavior: clear repeat payload before manually toggling a mobile form
+                    setRepeatDraft(null);
+                    setActiveForm(activeForm === id ? null : id);
+                    // -------------------------------------------------
+                  }}
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                 >

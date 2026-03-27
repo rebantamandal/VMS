@@ -1,12 +1,19 @@
-import React, { useState, useEffect } from "react";
+// -----------------changed by rebanta--------------
+// Added useRef import to support visitorsRef (current list snapshot) and idempotency guards
+import React, { useState, useEffect, useRef } from "react";
+// -------------------------------------------------
 import { motion, AnimatePresence } from "framer-motion";
-import { FaUser, FaWifi } from "react-icons/fa";
+import { FaUser, FaWifi, FaInfoCircle, FaFileExcel } from "react-icons/fa";
 import { useMsal } from "@azure/msal-react";
 import axios from "axios";
 import Swal from "sweetalert2";
 //--------------------------changed by rebanta------------------------------//
 import { validatePhoneLength } from "../utils/phoneUtils";
 import duplicateIcon from "../images/duplicate.png";
+// -----------------changed by rebanta--------------
+// Added BulkUploadModal import for Excel-based batch visitor import feature
+import BulkUploadModal from "./BulkUploadModal";
+// -------------------------------------------------
 //--------------------------changed by rebanta------------------------------//
 
 const MAX_VISITORS = 10;
@@ -27,6 +34,26 @@ const PHONE_HINTS = {
   "+61": "9 digits",
   "+46": "7–9 digits",
 };
+
+// -----------------changed by rebanta--------------
+// Moved COUNTRY_CODES to module scope (was inside component) so it can be
+// referenced by splitPhoneByCountryCode without a dependency on the component instance
+const COUNTRY_CODES = [
+  { code: "+91", label: "India (+91)" },
+  { code: "+81", label: "Japan (+81)" },
+  { code: "+971", label: "UAE (+971)" },
+  { code: "+65", label: "Singapore (+65)" },
+  { code: "+66", label: "Thailand (+66)" },
+  { code: "+86", label: "China (+86)" },
+  { code: "+27", label: "South Africa (+27)" },
+  { code: "+1", label: "USA (+1)" },
+  { code: "+44", label: "UK (+44)" },
+  { code: "+49", label: "Germany (+49)" },
+  { code: "+33", label: "France (+33)" },
+  { code: "+61", label: "Australia (+61)" },
+  { code: "+46", label: "Sweden (+46)" },
+];
+// -------------------------------------------------
 
 // Flag emoji per country code
 const COUNTRY_FLAGS = {
@@ -55,10 +82,76 @@ const isCardFilled = (v) =>
   v.TentativeinTime &&
   v.TentativeoutTime;
 
-export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) {
+// -----------------changed by rebanta--------------
+// New helpers: hasVisitorCoreFields checks if any meaningful data exists (used to detect
+// pre-filled batches); buildVisitorSeedSignature / buildVisitorBatchSignature produce
+// stable JSON keys used to deduplicate repeat-seed effect runs
+const hasVisitorCoreFields = (item) =>
+  item.firstName || item.lastName || item.email || item.company || item.phone || item.purposeOfVisit;
+
+const buildVisitorSeedSignature = (seed) => ({
+  category: seed?.category || "Visitor",
+  firstName: seed?.firstName || "",
+  lastName: seed?.lastName || "",
+  email: seed?.email || "",
+  company: seed?.company || "",
+  countryCode: seed?.countryCode || "",
+  phone: seed?.phone || "",
+  purposeOfVisit: seed?.purposeOfVisit || "",
+  meetingRoom: seed?.meetingRoom || "",
+  laptopSerial: seed?.laptopSerial || "",
+  guestWifiRequired: Boolean(seed?.guestWifiRequired),
+});
+
+const buildVisitorBatchSignature = (batch) =>
+  JSON.stringify(
+    (batch || []).map((seed) => ({
+      ...buildVisitorSeedSignature(seed),
+      TentativeinTime: seed?.TentativeinTime || seed?.inTime || "",
+      TentativeoutTime: seed?.TentativeoutTime || seed?.outTime || "",
+    }))
+  );
+// -------------------------------------------------
+
+// -----------------changed by rebanta--------------
+// New: splitPhoneByCountryCode robustly extracts country code + local number from a raw
+// phone string, replacing the previous single-regex approach that failed for some codes
+const splitPhoneByCountryCode = (rawPhone, explicitCountryCode, codeOptions) => {
+  const raw = String(rawPhone || "").trim();
+  const digits = raw.replace(/\D/g, "");
+  const codes = (codeOptions || [])
+    .map((item) => item.code)
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length);
+
+  if (explicitCountryCode) {
+    const explicitDigits = explicitCountryCode.replace(/\D/g, "");
+    if (digits.startsWith(explicitDigits) && digits.length > explicitDigits.length) {
+      return { countryCode: explicitCountryCode, phone: digits.slice(explicitDigits.length) };
+    }
+    return { countryCode: explicitCountryCode, phone: digits };
+  }
+
+  for (const code of codes) {
+    const ccDigits = code.replace(/\D/g, "");
+    if (digits.startsWith(ccDigits) && digits.length > ccDigits.length) {
+      return { countryCode: code, phone: digits.slice(ccDigits.length) };
+    }
+  }
+
+  return { countryCode: "+91", phone: digits };
+};
+// -------------------------------------------------
+
+export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit,
+// -----------------changed by rebanta--------------
+// Added repeatSeed, repeatBatch, onRepeatSeedConsumed props for the repeat-visitor
+// prefill flow; Array.isArray guard added to accounts to prevent crashes with undefined
+ repeatSeed, repeatBatch, onRepeatSeedConsumed }) {
+// -------------------------------------------------
   const { accounts } = useMsal();
 
-  const currentAccount = accounts[0];
+  const currentAccount = Array.isArray(accounts) ? accounts[0] : null;
   const ssoUserName =
     currentAccount?.name ||
     currentAccount?.username ||
@@ -71,22 +164,6 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) 
     currentAccount?.idTokenClaims?.email ||
     "Unknown User";
   console.log("Logged-in user email:", ssoEmail);
-
-  const COUNTRY_CODES = [
-    { code: "+91", label: "India (+91)" },
-    { code: "+81", label: "Japan (+81)" },
-    { code: "+971", label: "UAE (+971)" },
-    { code: "+65", label: "Singapore (+65)" },
-    { code: "+66", label: "Thailand (+66)" },
-    { code: "+86", label: "China (+86)" },
-    { code: "+27", label: "South Africa (+27)" },
-    { code: "+1", label: "USA (+1)" },
-    { code: "+44", label: "UK (+44)" },
-    { code: "+49", label: "Germany (+49)" },
-    { code: "+33", label: "France (+33)" },
-    { code: "+61", label: "Australia (+61)" },
-    { code: "+46", label: "Sweden (+46)" },
-  ];
 
   const emptyVisitor = {
     category: "Visitor",
@@ -112,7 +189,19 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) 
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
   const [autofillStates, setAutofillStates] = useState({});
-  const [phoneDropdownOpen, setPhoneDropdownOpen] = useState({});
+  // -----------------changed by rebanta--------------
+  // New state/refs: showBulkUpload controls the Import-from-Excel modal;
+  // visitorsRef mirrors state for read-only access inside effects without stale closures;
+  // processedRepeatSeedRef / processedRepeatBatchRef prevent duplicate seed effect runs
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
+  const visitorsRef = useRef(visitors);
+  const processedRepeatSeedRef = useRef("");
+  const processedRepeatBatchRef = useRef("");
+
+  useEffect(() => {
+    visitorsRef.current = visitors;
+  }, [visitors]);
+  // -------------------------------------------------
 
   const getNowLocal = () => {
     const now = new Date();
@@ -145,10 +234,12 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) 
 
   useEffect(() => {
     if (visitorToEdit) {
-      const rawPhone = visitorToEdit.phone || "";
-      const match = rawPhone.match(/^(\+\d{1,4})(\d{7,15})$/);
-      const parsedCountryCode = visitorToEdit.countryCode || match?.[1] || "+91";
-      const parsedPhone = match?.[2] || rawPhone;
+      // -----------------changed by rebanta--------------
+      // Replaced manual regex phone split with splitPhoneByCountryCode for robustness
+      const phoneParts = splitPhoneByCountryCode(visitorToEdit.phone, visitorToEdit.countryCode, COUNTRY_CODES);
+      const parsedCountryCode = phoneParts.countryCode;
+      const parsedPhone = phoneParts.phone;
+      // -------------------------------------------------
 
       setVisitors([{
         ...visitorToEdit,
@@ -165,6 +256,124 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) 
       setOpenIndex(0);
     }
   }, [visitorToEdit, ssoUserName]);
+
+  // -----------------changed by rebanta--------------
+  // New: repeatSeed effect — prefills a single visitor card from a previously submitted
+  // record; idempotency guard prevents double-application on re-renders
+  useEffect(() => {
+    if (!repeatSeed || visitorToEdit) return;
+
+    const seedSignature = JSON.stringify(buildVisitorSeedSignature(repeatSeed));
+    // Guard against repeated effect runs with the same repeat payload.
+    if (processedRepeatSeedRef.current === seedSignature) return;
+    processedRepeatSeedRef.current = seedSignature;
+
+    const phoneParts = splitPhoneByCountryCode(repeatSeed.phone, repeatSeed.countryCode, COUNTRY_CODES);
+    const parsedCountryCode = phoneParts.countryCode;
+    const parsedPhone = phoneParts.phone;
+
+      const nextVisitor = {
+        category: repeatSeed.category || "Visitor",
+        host: ssoUserName,
+        firstName: repeatSeed.firstName || "",
+        lastName: repeatSeed.lastName || "",
+        email: repeatSeed.email || "",
+        company: repeatSeed.company || "",
+        countryCode: parsedCountryCode,
+        phone: parsedPhone,
+        purposeOfVisit: "",
+      meetingRoom: "",
+      laptopSerial: repeatSeed.laptopSerial || "",
+      guestWifiRequired: false,
+      TentativeinTime: "",
+      TentativeoutTime: "",
+      submittedBy: ssoEmail,
+      status: "new",
+    };
+
+    setVisitors((prev) => {
+      const hasFilledEntries = prev.some(hasVisitorCoreFields);
+      const base = hasFilledEntries ? prev : [];
+      const combined = [...base, nextVisitor].slice(0, MAX_VISITORS);
+
+      if (combined.length === base.length) {
+        Swal.fire({ icon: "warning", title: `Maximum ${MAX_VISITORS} visitors allowed per submission.` });
+      }
+
+      setOpenIndex(Math.max(0, combined.length - 1));
+      return combined;
+    });
+    setAutofillStates({});
+    if (typeof onRepeatSeedConsumed === "function") onRepeatSeedConsumed();
+  }, [repeatSeed, visitorToEdit, ssoUserName, ssoEmail, onRepeatSeedConsumed]);
+  // -------------------------------------------------
+
+  // -----------------changed by rebanta--------------
+  // New: repeatBatch effect — prefills multiple visitor cards from a history batch;
+  // idempotency guard and slot-limit warning prevent duplicate cards and overflow
+  useEffect(() => {
+    if (!repeatBatch || visitorToEdit || !Array.isArray(repeatBatch) || repeatBatch.length === 0) return;
+
+    const batchSignature = buildVisitorBatchSignature(repeatBatch);
+    // Guard against repeated effect runs with the same repeat batch.
+    if (processedRepeatBatchRef.current === batchSignature) return;
+    processedRepeatBatchRef.current = batchSignature;
+
+    const mapped = repeatBatch.slice(0, MAX_VISITORS).map((seed) => {
+      const phoneParts = splitPhoneByCountryCode(seed.phone, seed.countryCode, COUNTRY_CODES);
+      const parsedCountryCode = phoneParts.countryCode;
+      const parsedPhone = phoneParts.phone;
+      const parsedInTime = seed.TentativeinTime
+        ? seed.TentativeinTime
+        : seed.inTime
+          ? new Date(seed.inTime).toISOString().slice(0, 16)
+          : "";
+      const parsedOutTime = seed.TentativeoutTime
+        ? seed.TentativeoutTime
+        : seed.outTime
+          ? new Date(seed.outTime).toISOString().slice(0, 16)
+          : "";
+
+        return {
+          category: seed.category || "Visitor",
+          host: ssoUserName,
+          firstName: seed.firstName || "",
+          lastName: seed.lastName || "",
+          email: seed.email || "",
+          company: seed.company || "",
+          countryCode: parsedCountryCode,
+          phone: parsedPhone,
+          purposeOfVisit: "",
+        meetingRoom: "",
+        laptopSerial: seed.laptopSerial || "",
+        guestWifiRequired: false,
+        TentativeinTime: parsedInTime,
+        TentativeoutTime: parsedOutTime,
+        submittedBy: ssoEmail,
+        status: "new",
+      };
+    });
+
+    setVisitors((prev) => {
+      const hasFilledEntries = prev.some(hasVisitorCoreFields);
+      const base = hasFilledEntries ? prev : [];
+      const combined = [...base, ...mapped].slice(0, MAX_VISITORS);
+
+      setOpenIndex(Math.max(0, combined.length - 1));
+      return combined;
+    });
+    setAutofillStates({});
+
+    const hasFilledEntries = visitorsRef.current.some(hasVisitorCoreFields);
+    const existingCount = hasFilledEntries ? visitorsRef.current.length : 0;
+    const availableSlots = Math.max(0, MAX_VISITORS - existingCount);
+    if (repeatBatch.length > availableSlots) {
+      Swal.fire({ icon: "warning", title: `Only first ${availableSlots} visitors were added due to form limit.` });
+    }
+
+    if (typeof onRepeatSeedConsumed === "function") onRepeatSeedConsumed();
+  }, [repeatBatch, visitorToEdit, ssoUserName, ssoEmail, onRepeatSeedConsumed]);
+  // -------------------------------------------------
 
   const handleChange = (index, field, value) => {
     setVisitors((prev) =>
@@ -344,9 +553,26 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) 
       exit={{ x: 200, opacity: 0 }}
       transition={{ duration: 0.5 }}
     >
-      <h3 className="fw-bold text-center mb-4">
-        {visitorToEdit ? "Edit Visitor" : "Visitor Details"}
-      </h3>
+      <div className="d-flex justify-content-between align-items-center mb-4">
+        {/* -----------------changed by rebanta-------------- */}
+        {/* Replaced plain <h3> with flex header row; added "Import from Excel" button
+            that opens BulkUploadModal for batch visitor import via Excel spreadsheet */}
+        <h3 className="fw-bold text-center mb-0">
+          {visitorToEdit ? "Edit Visitor" : "Visitor Details"}
+        </h3>
+        {!visitorToEdit && (
+          <button
+            type="button"
+            className="btn visitor-inline-btn btn-success btn-sm shadow px-3 me-2"
+            title="Import visitors from an Excel file"
+            onClick={() => setShowBulkUpload(true)}
+          >
+            <FaFileExcel className="me-2" />
+            Import from Excel
+          </button>
+        )}
+        {/* ------------------------------------------------- */}
+      </div>
 
       <form onSubmit={handleSubmit} className="d-flex flex-column gap-3">
         {visitors.map((visitor, index) => (
@@ -584,7 +810,16 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) 
                   </div>
 
                   {/* Tentative In Time */}
-                  <label className="fw-bold mt-3">Tentative In Time</label>
+                  <label className="fw-bold mt-3 d-flex align-items-center gap-2">
+                    <span>Tentative In Time</span>
+                    <span
+                      title="If Tentative Out is more than 24 hours after Tentative In, this entry is treated as repeated and daily pass tracking rules apply."
+                      style={{ cursor: "pointer", color: "#6b7280", fontSize: "0.9rem", lineHeight: 1 }}
+                      aria-label="Repeated visit rule"
+                    >
+                      <FaInfoCircle />
+                    </span>
+                  </label>
                   <div className="d-flex gap-2 align-items-center">
                     <input
                       type="datetime-local"
@@ -656,6 +891,18 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit }) 
         .wifi-toggle.active .toggle-circle { transform: translateX(24px); }
         .visitor-inline-btn { height: 38px; display: inline-flex; align-items: center; white-space: nowrap; flex-shrink: 0; }
       `}</style>
+
+      {/* -----------------changed by rebanta-------------- */}
+      {/* New: BulkUploadModal renders outside the form; accepts hostName and submittedBy
+          from SSO state; controlled by showBulkUpload flag */}
+      <BulkUploadModal
+        show={showBulkUpload}
+        type="visitor"
+        hostName={ssoUserName}
+        submittedBy={ssoEmail}
+        onClose={() => setShowBulkUpload(false)}
+      />
+      {/* ------------------------------------------------- */}
     </motion.div>
   );
 }

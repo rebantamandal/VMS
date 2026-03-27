@@ -1,6 +1,29 @@
 import Visitor from "../models/Visitor.js";
 import AdhocVisitor from "../models/Adhoc.js";
-import { sendOverstayEmailToHost } from "../email/emailservice.js";
+// -----------------changed by rebanta--------------
+// Added daily pass return alert sender alongside the existing overstay reminder email
+import { sendDailyPassReturnAlertEmail, sendOverstayEmailToHost } from "../email/emailservice.js";
+import {
+  formatPassTimestamp,
+  getDailyPassEvents,
+  getPassDateKey,
+  hasIssuedWithoutReturnForDate,
+  hasPassReturnAlertForDate,
+  isPassTrackingDay,
+  markPassReturnAlertSent,
+} from "../utils/passTracking.js";
+// -------------------------------------------------
+
+// -----------------changed by rebanta--------------
+// New daily-pass alert scheduling helpers: configurable IST trigger hour plus formatter/
+// helper functions used to decide when same-day pass return reminder emails should fire
+const PASS_RETURN_ALERT_HOUR_IST = Number(process.env.PASS_RETURN_ALERT_HOUR_IST || 20);
+
+const hourFormatter = new Intl.DateTimeFormat("en-IN", {
+  timeZone: "Asia/Kolkata",
+  hour: "2-digit",
+  hour12: false,
+});
 
 // Helper: is overdue by 15 mins
 function isOverdue15(outTime) {
@@ -17,6 +40,41 @@ function resolveHostEmail(v) {
   return v.hostEmail || v.submittedBy || null;
 }
 
+function getIstHour(date = new Date()) {
+  const hourText = hourFormatter.format(date);
+  const hour = Number.parseInt(hourText, 10);
+  return Number.isNaN(hour) ? 0 : hour;
+}
+
+async function runDailyPassReturnAlerts(records, type, now) {
+  const todayKey = getPassDateKey(now);
+  if (!todayKey || getIstHour(now) < PASS_RETURN_ALERT_HOUR_IST) {
+    return;
+  }
+
+  for (const record of records) {
+    if (!isPassTrackingDay(record, now)) continue;
+    if (!hasIssuedWithoutReturnForDate(record, todayKey)) continue;
+    if (hasPassReturnAlertForDate(record, todayKey)) continue;
+
+    const todayIssue = getDailyPassEvents(record).find(
+      (event) => event?.action === "issued" && event?.dateKey === todayKey
+    );
+
+    await sendDailyPassReturnAlertEmail({
+      type,
+      visitor: record,
+      toHostEmail: resolveHostEmail(record),
+      issuedAt: formatPassTimestamp(todayIssue?.recordedAt),
+      dateKey: todayKey,
+    });
+
+    markPassReturnAlertSent(record, todayKey);
+    await record.save();
+  }
+}
+// -------------------------------------------------
+
 export async function runOverstayReminderJob() {
   try {
     // Only check people who are currently inside
@@ -32,6 +90,10 @@ export async function runOverstayReminderJob() {
         outTime: { $ne: null },
       }),
     ]);
+
+    const now = new Date();
+
+    await runDailyPassReturnAlerts(visitors, "visitor", now);
 
     // VISITORS
     for (const v of visitors) {
