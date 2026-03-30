@@ -521,6 +521,7 @@ export default function VisitorForm({ isMobile, setActiveForm, visitorToEdit, re
           <button
             type="button"
             className="btn btn-outline-dark btn-sm"
+            title="Bulk upload visitors from an Excel file"
             onClick={() => setShowBulkUpload(true)}
           >
             Bulk Upload

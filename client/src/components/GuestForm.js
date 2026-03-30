@@ -557,6 +557,7 @@ export default function GuestForm({ isMobile, setActiveForm, guestToEdit, repeat
           <button
             type="button"
             className="btn btn-outline-dark btn-sm"
+            title="Bulk upload guests from an Excel file"
             onClick={() => setShowBulkUpload(true)}
           >
             Bulk Upload
